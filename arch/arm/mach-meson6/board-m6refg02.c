@@ -1234,28 +1234,16 @@ static int _key_code_list[] = {
 
 static inline int key_input_init_func(void)
 {
-    //Set GPIO input mode
-    gpio_direction_input(GPIO_PENIRQ);
-    //Set GPIO int edge mode: falling
-    gpio_enable_edge_int(gpio_to_idx(GPIO_PENIRQ), 1, 0);
+    WRITE_AOBUS_REG(AO_RTC_ADDR0, (READ_AOBUS_REG(AO_RTC_ADDR0) &~(1<<11)));
+    WRITE_AOBUS_REG(AO_RTC_ADDR1, (READ_AOBUS_REG(AO_RTC_ADDR1) &~(1<<3)));
     return 0;
 }
-static inline int key_scan(void *key_state_list)
+
+static inline int key_scan(void *data)
 {
+    int *key_state_list = (int*)data;
     int ret = 0;
-    int mode = 0;
-
-    mode = gpio_get_edge_mode(0);
-    if (mode) { //Key press down
-        //Set GPIO int edge mode: rising, that means it's time to wait for key up.
-        gpio_enable_edge_int(gpio_to_idx(GPIO_PENIRQ), 0, 0);
-        ret = 0;
-    } else { //Key press up
-        //Set GPIO int edge mode: falling, that means it's time to wait for key down.
-        gpio_enable_edge_int(gpio_to_idx(GPIO_PENIRQ), 1, 0);
-        ret = 1;
-    }
-
+    key_state_list[0] = ((READ_AOBUS_REG(AO_RTC_ADDR1) >> 2) & 1) ? 0 : 1;
     return ret;
 }
 
