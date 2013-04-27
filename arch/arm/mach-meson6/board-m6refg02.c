@@ -613,52 +613,36 @@ static void __init setup_eth_device(void)
 #ifdef CONFIG_AM_NAND
 static struct mtd_partition normal_partition_info[] = {
     {
-        .name = "logo",
+        .name 	= "logo",
         .offset = 8*1024*1024,
-        .size = 8*1024*1024,
+        .size	= 4*1024*1024
     },
     {
-        .name = "recovery",
-        .offset = 16*1024*1024,
-        .size = 8*1024*1024,
+        .name 	= "boot",
+        .offset = 12*1024*1024,
+        .size 	= 8*1024*1024,
     },
     {
-        .name = "boot",
-        .offset = 24*1024*1024,
-        .size = 8*1024*1024,
+        .name 	= "system",
+        .offset = 20*1024*1024,
+        .size 	= 512*1024*1024,
     },
     {
-        .name = "system",
-        .offset = 32*1024*1024,
-        .size = 224*1024*1024,
+        .name	= "cache",
+        .offset = 532*1024*1024,
+        .size 	= 500*1024*1024,
     },
     {
-        .name = "param",
-        .offset = 256*1024*1024,
-        .size = 2*1024*1024,
+        .name 	= "backup",
+        .offset = 1032*1024*1024,
+        .size 	= 300*1024*1024,
     },
     {
-        .name = "dtv",
-        .offset = 258*1024*1024,
-        .size = 32*1024*1024,
-    },
-    {
-        .name = "atv",
-        .offset = 290*1024*1024,
-        .size = 64*1024*1024,
-    },
-    {
-        .name = "cache",
-        .offset = 354*1024*1024,
-        .size = 16*1024*1024,
-    },
-    {
-        .name = "userdata",
-        .offset=MTDPART_OFS_APPEND,
-        .size=MTDPART_SIZ_FULL,
+        .name 	= "userdata",
+        .offset = MTDPART_OFS_APPEND,
+        .size 	= MTDPART_SIZ_FULL,
     },
 };
-
 
 static struct aml_nand_platform aml_nand_mid_platform[] = {
     {
