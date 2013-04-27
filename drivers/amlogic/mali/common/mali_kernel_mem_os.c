@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2012 ARM Limited. All rights reserved.
+ * Copyright (C) 2010-2013 ARM Limited. All rights reserved.
  * 
  * This program is free software and is provided to you under the terms of the GNU General Public License version 2
  * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
@@ -9,7 +9,6 @@
  */
 
 #include "mali_kernel_common.h"
-#include "mali_kernel_core.h"
 #include "mali_kernel_memory_engine.h"
 #include "mali_osk.h"
 
@@ -95,7 +94,7 @@ static u32 os_allocator_stat(mali_physical_memory_allocator * allocator)
 static void os_allocator_destroy(mali_physical_memory_allocator * allocator)
 {
 	os_allocator * info;
-	MALI_DEBUG_ASSERT_POINTER(allocator);
+        MALI_DEBUG_ASSERT_POINTER(allocator);
 	MALI_DEBUG_ASSERT_POINTER(allocator->ctx);
 	info = (os_allocator*)allocator->ctx;
 	_mali_osk_lock_term(info->mutex);

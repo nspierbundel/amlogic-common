@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2012 ARM Limited. All rights reserved.
+ * Copyright (C) 2010-2013 ARM Limited. All rights reserved.
  * 
  * This program is free software and is provided to you under the terms of the GNU General Public License version 2
  * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
@@ -9,7 +9,6 @@
  */
 
 #include "mali_kernel_common.h"
-#include "mali_kernel_core.h"
 #include "mali_kernel_memory_engine.h"
 #include "mali_osk.h"
 #include "mali_osk_list.h"
@@ -252,6 +251,7 @@ _mali_osk_errcode_t mali_allocation_engine_map_physical(mali_allocation_engine m
 
 		if ( _MALI_OSK_ERR_OK != err )
 		{
+			MALI_DEBUG_PRINT(2, ("Map failed: %s %d\n", __FUNCTION__, __LINE__));
 			MALI_ERROR( err );
 		}
 	}
@@ -271,7 +271,7 @@ _mali_osk_errcode_t mali_allocation_engine_map_physical(mali_allocation_engine m
 			MALI_DEBUG_PRINT( 2, ("Process address manager succeeded, but Mali Address manager failed for phys=0x%08X size=0x%08X, offset=0x%08X. Will unmap.\n", phys, size, offset));
 			engine->process_address->unmap_physical(descriptor, offset, size, unmap_flags);
 		}
-
+		MALI_DEBUG_PRINT(2, ("Map mali failed: %s %d\n", __FUNCTION__, __LINE__));
 		MALI_ERROR( err );
 	}
 

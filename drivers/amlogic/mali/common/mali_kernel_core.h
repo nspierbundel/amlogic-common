@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2012 ARM Limited. All rights reserved.
+ * Copyright (C) 2010-2013 ARM Limited. All rights reserved.
  * 
  * This program is free software and is provided to you under the terms of the GNU General Public License version 2
  * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
@@ -27,8 +27,6 @@ typedef enum
 _mali_osk_errcode_t mali_initialize_subsystems(void);
 
 void mali_terminate_subsystems(void);
-
-void mali_kernel_core_wakeup(void);
 
 _mali_product_id_t mali_kernel_core_get_product_id(void);
 
