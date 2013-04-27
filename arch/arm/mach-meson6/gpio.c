@@ -12,6 +12,7 @@ Linux PINMUX.C
 #include <mach/gpio_data.h>
 #include <mach/am_regs.h>
 #include "gpio_data.c"
+//#define DEBUG_PINMUX
 #ifndef DEBUG_PINMUX
 #define debug(a...)
 #else
@@ -222,7 +223,6 @@ int32_t pinmux_set(pinmux_set_t* pinmux )
 {
 	uint32_t locallock[P_PIN_MUX_REG_NUM];
     uint32_t reg,value,conflict,dest_value;
-	//ulong flags;
 	int i;
 	DECLARE_WAITQUEUE(wait, current);
 	if(pinmux==NULL)
@@ -249,7 +249,7 @@ retry:
             if(value!=dest_value)
             {
 
-                printk("set fail , detect locktable conflict,retry\n");
+                printk("set fail , detect locktable conflict,retry");
                 set_current_state(TASK_UNINTERRUPTIBLE);
                 add_wait_queue(&pinmux_wait_queue, &wait);
                 spin_unlock(&pinmux_set_lock);
@@ -282,7 +282,6 @@ retry:
 EXPORT_SYMBOL(pinmux_set);
 int32_t pinmux_clr(pinmux_set_t* pinmux)
 {
-	//ulong flags;
 	int i;
 
 	if(pinmux==NULL)
@@ -296,7 +295,7 @@ int32_t pinmux_clr(pinmux_set_t* pinmux)
 	spin_lock(&pinmux_set_lock);
 
 	pinmux->chip_select(false);
-	debug("pinmux_clr : %p\n" ,pinmux->pinmux);
+	debug("pinmux_clr : %p" ,pinmux->pinmux);
     for(i=0;pinmux->pinmux[i].reg!=0xffffffff;i++)
 	{
 		pimux_locktable[pinmux->pinmux[i].reg]&=~(pinmux->pinmux[i].clrmask|pinmux->pinmux[i].setmask);
@@ -305,7 +304,7 @@ int32_t pinmux_clr(pinmux_set_t* pinmux)
 
 	for(i=0;pinmux->pinmux[i].reg!=0xffffffff;i++)
 	{
-        debug("clrsetbits %x %x %x\n",p_pin_mux_reg_addr[pinmux->pinmux[i].reg],pinmux->pinmux[i].setmask|pinmux->pinmux[i].clrmask,pinmux->pinmux[i].clrmask);
+        debug("clrsetbits %x %x %x",p_pin_mux_reg_addr[pinmux->pinmux[i].reg],pinmux->pinmux[i].setmask|pinmux->pinmux[i].clrmask,pinmux->pinmux[i].clrmask);
 		clrsetbits_le32(p_pin_mux_reg_addr[pinmux->pinmux[i].reg],pinmux->pinmux[i].setmask|pinmux->pinmux[i].clrmask,pinmux->pinmux[i].clrmask);
 	}
 	wake_up(&pinmux_wait_queue);
@@ -362,7 +361,6 @@ bool gpio_get_status(uint32_t pin)
 {
 	unsigned bit,reg;
 
-	//bool bret;
 	reg=(pad_gpio_bit[pin]>>5)&0xf;
 	bit=(pad_gpio_bit[pin])&0x1f;
 
@@ -557,7 +555,7 @@ void gpio_irq_enable(uint32_t irq)
                     0x1,  ///GPIO_IRQ_RISING
                     0x10001, ///GPIO_IRQ_FALLING
                     };
-    debug("write reg %p clr=%x set=%x\n",P_GPIO_INTR_EDGE_POL,0x10001<<idx,type[gpio_irqs[idx].irq]<<idx);
+    debug("write reg %p clr=%x set=%x",P_GPIO_INTR_EDGE_POL,0x10001<<idx,type[gpio_irqs[idx].irq]<<idx);
     /// set trigger type
     clrsetbits_le32(P_GPIO_INTR_EDGE_POL,0x10001<<idx,type[gpio_irqs[idx].irq]<<idx);
 
@@ -565,11 +563,11 @@ void gpio_irq_enable(uint32_t irq)
     reg=idx<4?P_GPIO_INTR_GPIO_SEL0:P_GPIO_INTR_GPIO_SEL1;
     start_bit=(idx&3)*8;
     clrsetbits_le32(reg,0xff<<start_bit,gpio_irqs[idx].pad<<start_bit);
-    debug("write reg %p clr=%x set=%x\n",reg,0xff<<start_bit,gpio_irqs[idx].pad<<start_bit);
+    debug("write reg %p clr=%x set=%x",reg,0xff<<start_bit,gpio_irqs[idx].pad<<start_bit);
     ///set filter
     start_bit=(idx)*4;
     clrsetbits_le32(P_GPIO_INTR_FILTER_SEL0,0x7<<start_bit,gpio_irqs[idx].filter<<start_bit);
-    debug("write reg %p clr=%x set=%x\n",P_GPIO_INTR_FILTER_SEL0,0x7<<start_bit,gpio_irqs[idx].filter<<start_bit);
+    debug("write reg %p clr=%x set=%x",P_GPIO_INTR_FILTER_SEL0,0x7<<start_bit,gpio_irqs[idx].filter<<start_bit);
 
 }
 EXPORT_SYMBOL(gpio_irq_enable);
@@ -590,7 +588,6 @@ static struct gpio_addr gpio_addrs[] = {
     [PREG_PAD_GPIO4] = {P_PREG_PAD_GPIO4_EN_N, P_PREG_PAD_GPIO4_O, P_PREG_PAD_GPIO4_I},
     [PREG_PAD_GPIO5] = {P_PREG_PAD_GPIO5_EN_N, P_PREG_PAD_GPIO5_O, P_PREG_PAD_GPIO5_I},
     [PREG_PAD_GPIOAO] = {P_AO_GPIO_O_EN_N,     P_AO_GPIO_O_EN_N,   P_AO_GPIO_I},
-    [PREG_PAD_GPIO6] = {P_PREG_PAD_GPIO6_EN_N, P_PREG_PAD_GPIO6_O, P_PREG_PAD_GPIO6_I},
 };
 
 int gpio_direction_input(unsigned gpio)
@@ -661,17 +658,6 @@ void gpio_enable_edge_int(int pin , int flag, int group)
         aml_set_reg32_bits(P_GPIO_INTR_EDGE_POL, flag, group+16, 1);
 }
 
-//mode 0:rising, 1:falling
-int gpio_get_edge_mode(int group)
-{
-    int mode = 1;
-    int value = 0;
-
-    value = READ_CBUS_REG(GPIO_INTR_EDGE_POL);
-    mode = ((value>>(16+group))&0x1);
-    return mode;
-}
-
 int set_gpio_mode(gpio_bank_t bank, int bit, gpio_mode_t mode)
 {
     unsigned long addr = gpio_addrs[bank].mode_addr;
@@ -684,13 +670,6 @@ int set_gpio_mode(gpio_bank_t bank, int bit, gpio_mode_t mode)
 		aml_set_reg32_bits(addr, mode, bit, 1);
     return 0;
 }
-
-gpio_mode_t get_gpio_mode(gpio_bank_t bank,int bit)
-{
-    unsigned long addr=gpio_addrs[bank].mode_addr;
-    return (aml_get_reg32_bits(addr,bit,1)>0)?(GPIO_INPUT_MODE):(GPIO_OUTPUT_MODE);
-}
-
 unsigned long  get_gpio_val(gpio_bank_t bank, int bit)
 {
     unsigned long addr = gpio_addrs[bank].in_addr;
@@ -701,13 +680,6 @@ unsigned long  get_gpio_val(gpio_bank_t bank, int bit)
 #endif
 		return aml_get_reg32_bits(addr,bit,1);
 }
-int set_gpio_val(gpio_bank_t bank,int bit,unsigned long val)
-{
-    unsigned long addr = gpio_addrs[bank].out_addr;
-    aml_set_reg32_bits(addr, val?1:0, bit, 1);
-    return 0;
-}
-
 void gpio_free(unsigned gpio)
 {
 	return;
