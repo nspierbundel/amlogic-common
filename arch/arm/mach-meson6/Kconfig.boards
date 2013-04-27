@@ -14,4 +14,11 @@ config MACH_MESON6_REF
 	help
           Support for Amlogic Meson6 reference development platform.
 
+config MACH_MESON6_REFG02
+	depends on ARCH_MESON6
+	bool "Meson6 reference board G02"
+	default y 
+	help
+          Support for Amlogic Meson6 reference development platform.
+
 endif # ARCH_MESON6
