@@ -14,7 +14,7 @@
 typedef pinmux_item_t gpio_item_t;
 typedef gpio_item_t gpio_set_t;
 /**
- * @return 0, success , 
+ * @return 0, success ,
  * 		   SOMEPIN IS LOCKED, some pin is locked to the specail feature . You can not change it
  * 		   NOTAVAILABLE, not available .
  */
@@ -44,10 +44,10 @@ static inline int32_t gpio_out_low(uint32_t pin)
 
 	/**
 	 * Multi pin operation
-	 * @return 0, success , 
+	 * @return 0, success ,
 	 * 		   SOMEPIN IS LOCKED, some pin is locked to the specail feature . You can not change it
 	 * 		   NOTAVAILABLE, not available .
-	 * 
+	 *
 	 */
 
 gpio_set_t * gpio_out_group_cacl(uint32_t pin,uint32_t bits, ... );
@@ -61,10 +61,10 @@ int32_t gpio_in_get(uint32_t pin); ///one bit operation
 	 */
 	/**
 	 * Multi pin operation
-	 * @return 0, success , 
+	 * @return 0, success ,
 	 * 		   SOMEPIN IS LOCKED, some pin is locked to the specail feature . You can not change it
 	 * 		   NOTAVAILABLE, not available .
-	 * 
+	 *
 	 */
 gpio_set_t * gpio_in_group_cacl(uint32_t pin,uint32_t bits, ... );
 typedef int64_t gpio_in_t;
@@ -127,6 +127,7 @@ typedef enum gpio_bank {
     PREG_PAD_GPIO4,
     PREG_PAD_GPIO5,
 	PREG_PAD_GPIOAO,
+	PREG_PAD_GPIO6,
 #ifdef CONFIG_EXGPIO
     EXGPIO_BANK0,
     EXGPIO_BANK1,
@@ -174,8 +175,12 @@ unsigned long  get_gpio_val(gpio_bank_t bank, int bit);
 #define GPIOX_bank_bit32_35(bit)    (PREG_PAD_GPIO3)
 #define GPIOX_bit_bit32_35(bit)     (bit- 32 + 20)
 
-#define GPIOY_bank_bit0_22(bit)     (PREG_PAD_GPIO5)
-#define GPIOY_bit_bit0_22(bit)      (bit)
+#define GPIOY_bank_bit0_27(bit)     (PREG_PAD_GPIO5)
+#define GPIOY_bit_bit0_27(bit)      (bit)
+
+#define GPIOZ_bank_bit0_19(bit)     (PREG_PAD_GPIO5)
+#define GPIOZ_bit_bit0_19(bit)      (bit)
+
 
 enum {
     GPIOY_IDX = 0,
@@ -199,6 +204,9 @@ extern int gpio_to_idx(unsigned gpio);
  * @param [in] group  this interrupt belong to which interrupt group  from 0 to 7
  */
 extern void gpio_enable_edge_int(int pin , int flag, int group);
+
+extern int gpio_get_edge_mode(int group);
+
 /**
  * enable gpio level interrupt
  *
