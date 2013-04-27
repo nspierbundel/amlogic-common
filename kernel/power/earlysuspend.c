@@ -217,7 +217,7 @@ void request_suspend_state(suspend_state_t new_state)
 		mutex_lock(&suspend_mutex);
 		mutex_unlock(&suspend_mutex);
 	}
-#endif CONFIG_SCREEN_ON_EARLY
+#endif
 }
 
 suspend_state_t get_suspend_state(void)
