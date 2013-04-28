@@ -278,23 +278,23 @@ static pinmux_item_t aml_i2c_b_pinmux_item[]= {
     {
         .reg = 5,
         //.clrmask = (3<<28)|(3<<26),
-        .setmask = 3<<26
+        .setmask = 3<<30
     },
     PINMUX_END_ITEM
 };
 
 static struct aml_i2c_platform aml_i2c_plat_b = {
-    .wait_count     = 50000,
-    .wait_ack_interval = 5,
+    .wait_count     	= 50000,
+    .wait_ack_interval 	= 5,
     .wait_read_interval = 5,
     .wait_xfer_interval = 5,
-    .master_no      = AML_I2C_MASTER_B,
-    .use_pio        = 0,
+    .master_no      	= AML_I2C_MASTER_B,
+    .use_pio        	= 0,
     .master_i2c_speed   = AML_I2C_SPPED_100K,
 
     .master_pinmux  = {
         .chip_select    = pinmux_dummy_share,
-        .pinmux     = &aml_i2c_b_pinmux_item[0]
+        .pinmux     	= &aml_i2c_b_pinmux_item[0]
     }
 };
 
@@ -307,10 +307,10 @@ static struct resource aml_i2c_resource_b[] = {
 };
 
 static struct platform_device aml_i2c_device_b = {
-    .name     = "aml-i2c",
-    .id       = 1,
-    .num_resources    = ARRAY_SIZE(aml_i2c_resource_b),
-    .resource     = aml_i2c_resource_b,
+    .name     		= "aml-i2c",
+    .id      		= 0,
+    .num_resources  = ARRAY_SIZE(aml_i2c_resource_b),
+    .resource     	= aml_i2c_resource_b,
     .dev = {
         .platform_data = &aml_i2c_plat_b,
     },
