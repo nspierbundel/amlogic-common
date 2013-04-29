@@ -48,7 +48,10 @@ static DEFINE_MUTEX(clock_ops_lock);
 static unsigned int mali_max = 333000;
 static unsigned int freq_limit = 1;
 
-static int set_sys_pll(struct clk *clk, unsigned long src, unsigned long dst, unsigned * scale_divn);
+static int set_sys_pll_scale(struct clk *clk, unsigned long src, unsigned long dst, unsigned * scale_divn);
+static int set_sys_pll(struct clk *clk, unsigned long dst);
+void print_clk_name(struct clk* clk);
+
 #define IS_CLK_ERR(a)  (IS_ERR(a) || a == 0)
 
 #if 0
@@ -421,13 +424,17 @@ int meson_notify_childs_changed(struct clk *clk,int before,int failed)
 //flow. self -> child -> child slibling
 int meson_clk_set_rate(struct clk *clk, unsigned long rate)
 {
-	unsigned long flags=0;
+	// unsigned long flags=0;
 	int ret;
 	int ops_run_count;
 	struct clk_ops *p;
-
-	if(clk->set_rate == NULL || IS_CLK_ERR(clk))
-			return 0;
+			
+	if (IS_ERR_OR_NULL(clk))
+		return -EINVAL;	
+	
+	if (clk->set_rate == NULL)
+	    return -EINVAL;
+			
 	//post message before clk change.
 	{
 			ret = 0;
@@ -444,19 +451,13 @@ int meson_clk_set_rate(struct clk *clk, unsigned long rate)
 			meson_notify_childs_changed(clk,1,ret);
 	}
 
-
-	if(ret == 0){
-	  if (!clk->open_irq)
-	      spin_lock_irqsave(&clockfw_lock, flags);
-	  else
-	      spin_lock(&clockfw_lock);
-//		printk(KERN_INFO "%s() clk=%p rate=%lu\n", __FUNCTION__, clk, rate);
-	  if(clk->set_rate)
-	  	ret = clk->set_rate(clk, rate) ;
-	  if (!clk->open_irq)
-	      spin_unlock_irqrestore(&clockfw_lock, flags);
-	  else
-	      spin_unlock(&clockfw_lock);
+	
+	
+	if(ret == 0) {
+	    //  spin_lock_irqsave(&clockfw_lock, flags);
+		//	printk(KERN_INFO "%s() clk=%p rate=%lu\n", __FUNCTION__, clk, rate);
+	  	ret = clk->set_rate(clk, rate);
+	    //  spin_unlock_irqrestore(&clockfw_lock, flags);
 	}
 
 	//post message after clk change.
@@ -483,16 +484,16 @@ int clk_set_rate(struct clk *clk, unsigned long rate)
 	int ret=0;
 	int parent_rate = 0;
 	if(IS_CLK_ERR(clk))
-		return 0;
+		return -EINVAL;
 	if(clk_get_rate(clk) == rate){
-			return 0;
+		return 0;
 	}
 
 	if(clk->need_parent_changed){
 		unsigned long flags;
-	  spin_lock_irqsave(&clockfw_lock, flags);
+		spin_lock_irqsave(&clockfw_lock, flags);
 		parent_rate = clk->need_parent_changed(clk, rate);
-	  spin_unlock_irqrestore(&clockfw_lock, flags);
+		spin_unlock_irqrestore(&clockfw_lock, flags);
 	}
 
 	if(parent_rate != 0)
@@ -863,7 +864,7 @@ static int _clk_set_rate_cpu(struct clk *clk, unsigned long cpu, unsigned long g
 				parent = cpu * factor;
 			}
 
-			set_sys_pll(clk->parent, parent);
+			set_sys_pll_scale(clk->parent, parent);
 		}
 
 		cpu_clk_cntl = ((cpu_clk_cntl & ~((3 << 2) | (0x3f << 8))) | (scale_out << 2) | (n << 8));
@@ -873,7 +874,7 @@ static int _clk_set_rate_cpu(struct clk *clk, unsigned long cpu, unsigned long g
 	#if 0
 		//set_sys_pll(clk->parent, cpu);
 	#else
-		scale_out = set_sys_pll(clk->parent, oldcpu, cpu, &n);
+		scale_out = set_sys_pll_scale(clk->parent, oldcpu, cpu, &n);
 		parent = clk_get_rate_sys(clk->parent);
 		// update actual cpu freq
 		cpu = parent;
@@ -1538,7 +1539,10 @@ static int __init a9_clk_min(char *str)
 }
 
 early_param("a9_clk_min", a9_clk_min);
-static int set_sys_pll(struct clk *clk, unsigned long src, unsigned long dst, unsigned * scale_divn)
+
+
+
+static int set_sys_pll_scale(struct clk *clk, unsigned long src, unsigned long dst, unsigned * scale_divn)
 {
 	int idx;
 	unsigned int curr_cntl = aml_read_reg32(P_HHI_SYS_PLL_CNTL);
@@ -1677,6 +1681,13 @@ static int set_sys_pll(struct clk *clk, unsigned long src, unsigned long dst)
 	return 1;
 }
 #endif
+
+static int set_sys_pll(struct clk *clk, unsigned long dst)
+{
+	unsigned int n = 0;
+	unsigned long oldcpu = clk_get_rate_a9(clk);
+	return set_sys_pll_scale(clk, oldcpu, dst, &n);
+}
 
 static int set_hpll_pll(struct clk * clk, unsigned long dst)
 {
