@@ -4,6 +4,7 @@ dsp_register.h
 #ifndef DSP_REGISTER_H
 #define DSP_REGISTER_H
 #include <linux/dma-mapping.h>
+#include <mach/cpu.h>
 
 #define SYS_MEM_START	0x80000000
 #define SYS_MEM_SIZE	0x8000000
