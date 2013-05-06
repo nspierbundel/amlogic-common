@@ -96,7 +96,6 @@ env.sh
 kernel/timeconst.h
 lib/crc32table.h
 lib/gen_crc32table
-scripts/Makefile.lib
 scripts/basic/fixdep
 scripts/conmakehash
 scripts/kallsyms
@@ -110,3 +109,4 @@ scripts/mod/mk_elfconfig
 scripts/mod/modpost
 usr/gen_init_cpio
 usr/initramfs_data.cpio
+toolchain
