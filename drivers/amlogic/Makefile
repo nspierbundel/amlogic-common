@@ -53,13 +53,10 @@ obj-$(CONFIG_AMLOGIC_SPI_NOR) += spi_nor/
 obj-$(CONFIG_CARDREADER) += cardreader/
 obj-$(CONFIG_MMC_AML) +=mmc/
 
-ifneq ($(wildcard $(srctree)/$(src)/ump/Kbuild),)
+ifneq ($(wildcard $(srctree)/$(src)/mali/ump/Kbuild),)
     # use sources existing within kernel source tree at drivers/amlogic/{ump,mali}
-    obj-$(CONFIG_UMP) += ump/
-    obj-$(CONFIG_MALI400) += mali/
-else
-#    obj-$(CONFIG_UMP) += ../../../hardware/arm/gpu/ump/
-    obj-$(CONFIG_MALI400) += ../../../hardware/arm/gpu/malir3p2/
+    obj-$(CONFIG_UMP) += mali/ump/
+    obj-$(CONFIG_MALI400) += mali/mali/
 endif
 
 obj-y += vfm/
