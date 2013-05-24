@@ -11,6 +11,8 @@
 # For each arch check: CROSS_COMPILE , KDIR , CFLAGS += -DARCH
 
 export ARCH ?= arm
+TARGET_PLATFORM ?= aml-meson
+CONFIG ?= aml-meson-m400-1
 BUILD ?= debug
 
 check_cc2 = \
