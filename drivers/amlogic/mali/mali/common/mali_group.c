@@ -7,6 +7,13 @@
  * A copy of the licence is included with the program, and can also be obtained from Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
+ 
+ //#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+#include <linux/kernel.h>
+#include <asm/io.h>
+#include <mach/am_regs.h>
+#include <linux/module.h>
+//#endif
 
 #include "mali_kernel_common.h"
 #include "mali_group.h"
@@ -1179,6 +1186,19 @@ static void mali_group_mmu_page_fault(struct mali_group *group)
 	}
 }
 
+
+inline mali_bool mali_group_power_is_on_2(struct mali_group *group)
+{
+#ifdef DEBUG
+	if(_mali_osk_lock_get_owner(group->lock) == _mali_osk_get_tid())
+		return group->power_is_on;
+	else 
+		return MALI_FALSE;
+#else
+	return group->power_is_on;
+#endif
+}
+
 _mali_osk_errcode_t mali_group_upper_half_mmu(void * data)
 {
 	struct mali_group *group = (struct mali_group *)data;
@@ -1187,6 +1207,18 @@ _mali_osk_errcode_t mali_group_upper_half_mmu(void * data)
 
 	MALI_DEBUG_ASSERT_POINTER(mmu);
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+	if ( MALI_FALSE == mali_group_power_is_on_2(group) )
+	{
+		if (mmu->id == 2)
+			malifix_set_mmu_int_process_state(0, MMU_INT_NONE);
+		else if (mmu->id == 3)
+			malifix_set_mmu_int_process_state(1, MMU_INT_NONE);
+		MALI_DEBUG_PRINT(4, ("Mali MMU: invalid interrupt. <<-- \n"));
+		MALI_SUCCESS;
+	}
+#endif
+	
 	/* Check if it was our device which caused the interrupt (we could be sharing the IRQ line) */
 	int_stat = mali_mmu_get_int_status(mmu);
 	if (0 != int_stat)
@@ -1247,6 +1279,12 @@ static void mali_group_bottom_half_mmu(void * data)
 
 		mali_group_mmu_page_fault(group);
 	}
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+	if (mmu->id == 2)
+		malifix_set_mmu_int_process_state(0, MMU_INT_NONE);
+	else if (mmu->id == 3)
+		malifix_set_mmu_int_process_state(1, MMU_INT_NONE);
+#endif	
 
 	mali_group_unlock(group);
 }
@@ -1531,6 +1569,22 @@ _mali_osk_errcode_t mali_group_upper_half_pp(void *data)
 	return _MALI_OSK_ERR_FAULT;
 }
 
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+int PP0_int_cnt = 0;
+int mali_PP0_int_cnt(void)
+{
+    return PP0_int_cnt;
+}
+EXPORT_SYMBOL(mali_PP0_int_cnt);
+
+int PP1_int_cnt = 0;
+int mali_PP1_int_cnt(void)
+{
+    return PP1_int_cnt;
+}
+EXPORT_SYMBOL(mali_PP1_int_cnt);
+#endif
+
 static void mali_group_bottom_half_pp(void *data)
 {
 	struct mali_group *group = (struct mali_group *)data;
@@ -1604,6 +1658,14 @@ static void mali_group_bottom_half_pp(void *data)
 					      0, _mali_osk_get_tid(), 0, 0, 0);
 		return;
 	}
+
+	
+#if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
+	if (core->core_id == 0)
+		PP0_int_cnt++;
+	else if (core->core_id == 1)
+		PP1_int_cnt++;
+#endif
 
 	/*
 	 * Now lets look at the possible error cases (IRQ indicating error or timeout)

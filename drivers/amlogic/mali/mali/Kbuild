@@ -21,6 +21,11 @@ MALI_PP_SCHEDULER_KEEP_SUB_JOB_STARTS_ALIGNED ?= 0
 MALI_PP_SCHEDULER_FORCE_NO_JOB_OVERLAP_BETWEEN_APPS ?= 0
 MALI_UPPER_HALF_SCHEDULING ?= 1
 
+TARGET_PLATFORM=meson_platform
+MALI_PLATFORM_FILES = platform/meson_platform/mali_fix.c \
+                      platform/meson_platform/mali_platform.c \
+                      platform/meson_platform/meson_main.c
+
 # For customer releases the Linux Device Drivers will be provided as ARM proprietary and GPL releases:
 # The ARM proprietary product will only include the license/proprietary directory
 # The GPL product will only include the license/gpl directory
