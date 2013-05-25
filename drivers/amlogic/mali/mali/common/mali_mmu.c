@@ -97,6 +97,11 @@ struct mali_mmu_core *mali_mmu_create(_mali_osk_resource_t *resource, struct mal
 	mmu = _mali_osk_calloc(1,sizeof(struct mali_mmu_core));
 	if (NULL != mmu)
 	{
+#if MESON_CPU_TYPE == MESON_CPU_TYPE_MESON6
+		extern int static_pp_mmu_cnt;
+		mmu->id = static_pp_mmu_cnt++;
+		//MALI_DEBUG_PRINT(3, ("Mali MMU: mmu_id: %d\n", resource->mmu_id));
+#endif
 		if (_MALI_OSK_ERR_OK == mali_hw_core_create(&mmu->hw_core, resource, MALI_MMU_REGISTERS_SIZE))
 		{
 			if (_MALI_OSK_ERR_OK == mali_group_add_mmu_core(group, mmu))
