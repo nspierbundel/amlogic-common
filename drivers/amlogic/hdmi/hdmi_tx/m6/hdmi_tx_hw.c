@@ -849,7 +849,7 @@ void hdmi_tvenc_set(Hdmi_tx_video_para_t *param)
         ENC_OFFSET_RIGHT(P_ENCP_DE_H_BEGIN);
         ENC_OFFSET_RIGHT(P_ENCP_DE_H_END);
 #undef ENC_OFFSET_POSITION
-#undef ENC_OFFSET_RIGHT(reg)
+#undef ENC_OFFSET_RIGHT
     }
 
     switch(param->VIC)
@@ -2573,6 +2573,15 @@ static int hdmitx_m3_set_audmode(struct hdmi_tx_dev_s* hdmitx_device, Hdmi_tx_au
         case FS_48K:
             audio_N_para = 6144 * 2;
             break;
+	case FS_REFER_TO_STREAM:
+	case FS_32K:
+	case FS_88K2:
+	case FS_96K:
+	case FS_176K4:
+	case FS_192K:
+	case FS_MAX:
+	    audio_N_para = 6272 * 2;
+	    break;
     }
 
     //TODO. Different audio type, maybe have different settings
