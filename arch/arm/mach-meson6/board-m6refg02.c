@@ -71,7 +71,7 @@
 #include <linux/uart-aml.h>
 #include <linux/i2c-aml.h>
 
-#include "board-m6g20.h"
+#include "board-m6refg02.h"
 
 #ifdef CONFIG_MMC_AML
 #include <mach/mmc.h>
@@ -94,96 +94,6 @@
 #ifdef CONFIG_AML_HDMI_TX
 #include <plat/hdmi_config.h>
 #endif
-
-
-/***********************************************************************
- * IO Mapping
- **********************************************************************/
-#define PHYS_MEM_START      (0x80000000)
-#define PHYS_MEM_SIZE       (1024*SZ_1M)
-#define PHYS_MEM_END        (PHYS_MEM_START + PHYS_MEM_SIZE -1 )
-
-/******** Reserved memory setting ************************/
-#define RESERVED_MEM_START  (0x80000000+64*SZ_1M)   /*start at the second 64M*/
-
-/******** CODEC memory setting ************************/
-//  Codec need 16M for 1080p decode
-//  4M for sd decode;
-#define ALIGN_MSK           ((SZ_1M)-1)
-#define U_ALIGN(x)          ((x+ALIGN_MSK)&(~ALIGN_MSK))
-#define D_ALIGN(x)          ((x)&(~ALIGN_MSK))
-
-/******** AUDIODSP memory setting ************************/
-#define AUDIODSP_ADDR_START U_ALIGN(RESERVED_MEM_START) /*audiodsp memstart*/
-#define AUDIODSP_ADDR_END   (AUDIODSP_ADDR_START+SZ_1M-1)   /*audiodsp memend*/
-
-/******** Frame buffer memory configuration ***********/
-#define OSD_480_PIX         (640*480)
-#define OSD_576_PIX         (768*576)
-#define OSD_720_PIX         (1280*720)
-#define OSD_1080_PIX        (1920*1080)
-#define OSD_PANEL_PIX       (800*480)
-#define B16BpP  (2)
-#define B32BpP  (4)
-#define DOUBLE_BUFFER   (2)
-
-#define OSD1_MAX_MEM        U_ALIGN(OSD_1080_PIX*B32BpP*DOUBLE_BUFFER)
-#define OSD2_MAX_MEM        U_ALIGN(32*32*B32BpP)
-
-/******** Reserved memory configuration ***************/
-#define OSD1_ADDR_START     U_ALIGN(AUDIODSP_ADDR_END )
-#define OSD1_ADDR_END       (OSD1_ADDR_START+OSD1_MAX_MEM - 1)
-#define OSD2_ADDR_START     U_ALIGN(OSD1_ADDR_END)
-#define OSD2_ADDR_END       (OSD2_ADDR_START +OSD2_MAX_MEM -1)
-
-
-#if defined(CONFIG_AM_VDEC_H264MVC)
-    #define CODEC_MEM_SIZE U_ALIGN(64*SZ_1M) 
-#elif defined(CONFIG_AM_VDEC_H264) 
-#define CODEC_MEM_SIZE      U_ALIGN(32*SZ_1M)
-#else
-#define CODEC_MEM_SIZE      U_ALIGN(16*SZ_1M)
-#endif
-#define CODEC_ADDR_START    U_ALIGN(OSD2_ADDR_END)
-#define CODEC_ADDR_END      (CODEC_ADDR_START+CODEC_MEM_SIZE-1)
-
-/********VDIN memory configuration ***************/
-#define VDIN_ADDR_START     U_ALIGN(CODEC_ADDR_END)
-#define VDIN_ADDR_END       (VDIN_ADDR_START + CODEC_MEM_SIZE - 1)
-
-#if defined(CONFIG_AMLOGIC_VIDEOIN_MANAGER)
-#define VM_SIZE             (SZ_1M*16)
-#else
-#define VM_SIZE             (0)
-#endif /* CONFIG_AMLOGIC_VIDEOIN_MANAGER  */
-
-#define VM_ADDR_START       U_ALIGN(VDIN_ADDR_END)
-#define VM_ADDR_END         (VM_SIZE + VM_ADDR_START - 1)
-
-#if defined(CONFIG_AM_DEINTERLACE_SD_ONLY)
-#define DI_MEM_SIZE         (SZ_1M*3)
-#else
-#define DI_MEM_SIZE         (SZ_1M*15)
-#endif
-#define DI_ADDR_START       U_ALIGN(VDIN_ADDR_END)
-#define DI_ADDR_END         (DI_ADDR_START+DI_MEM_SIZE-1)
-
-#ifdef CONFIG_POST_PROCESS_MANAGER
-#ifdef CONFIG_POST_PROCESS_MANAGER_PPSCALER
-#define PPMGR_MEM_SIZE               1920 * 1088 * 22
-#else
-#define PPMGR_MEM_SIZE               1920 * 1088 * 15
-#endif
-#else
-#define PPMGR_MEM_SIZE		0
-#endif /* CONFIG_POST_PROCESS_MANAGER */
-
-#define PPMGR_ADDR_START	U_ALIGN(VDIN_ADDR_END)
-#define PPMGR_ADDR_END		(PPMGR_ADDR_START+PPMGR_MEM_SIZE-1)
-
-#define STREAMBUF_MEM_SIZE          (SZ_1M*10)
-#define STREAMBUF_ADDR_START        U_ALIGN(PPMGR_ADDR_END)
-#define STREAMBUF_ADDR_END      (STREAMBUF_ADDR_START+STREAMBUF_MEM_SIZE-1)
 
 #define RESERVED_MEM_END    (STREAMBUF_ADDR_END)
 static struct resource meson_fb_resource[] = {
@@ -519,7 +429,7 @@ static pinmux_set_t aml_uart_a = {
     .chip_select = NULL,
     .pinmux = &uart_pins[1]
 };
-static struct aml_uart_platform  __initdata aml_uart_plat = {
+static struct aml_uart_platform aml_uart_plat = {
     .uart_line[0]   = UART_AO,
     .uart_line[1]   = UART_A,
     .uart_line[2]   = UART_B,
@@ -897,7 +807,6 @@ static  int __init setup_usb_devices(void)
  *WiFi power section
  **********************************************************************/
 /* built-in usb wifi power ctrl, usb dongle must register NULL to power_ctrl! 1:power on  0:power off */
-#ifdef CONFIG_AM_WIFI
 #ifdef CONFIG_AM_WIFI_USB
 static int usb_wifi_power(int is_power)
 {
@@ -1603,6 +1512,13 @@ static struct platform_device  *platform_devs[] = {
 #endif
 };
 
+#ifdef CONFIG_AML_HDMI_TX
+    extern int setup_hdmi_dev_platdata(void* platform_data);
+#endif
+#if defined(CONFIG_SUSPEND)
+    extern  int console_suspend_enabled;
+#endif
+
 static __init void meson_init_machine(void)
 {
 //    meson_cache_init();
@@ -1621,28 +1537,23 @@ static __init void meson_init_machine(void)
 #endif
 
 #ifdef CONFIG_AML_HDMI_TX
-    extern int setup_hdmi_dev_platdata(void* platform_data);
     setup_hdmi_dev_platdata(&aml_hdmi_pdata);
 #endif
 #ifdef CONFIG_AM_REMOTE
     setup_remote_device();
 #endif
 #ifdef CONFIG_EFUSE
-    setup_aml_efuse();	
+    setup_aml_efuse();
 #endif
     setup_usb_devices();
     setup_devices_resource();
-#ifdef CONFIG_AM_WIFI
-    wifi_dev_init();
-#endif
     platform_add_devices(platform_devs, ARRAY_SIZE(platform_devs));
 #ifdef CONFIG_AM_WIFI_USB
     if(wifi_plat_data.usb_set_power)
-        wifi_plat_data.usb_set_power(0);//power off built-in usb wifi
+        wifi_plat_data.usb_set_power(1);//power off built-in usb wifi
 #endif
 #if defined(CONFIG_SUSPEND)
     {//todo: remove it after verified. need set it in uboot environment variable.
-    extern  int console_suspend_enabled;
     console_suspend_enabled = 0;
     }
 #endif

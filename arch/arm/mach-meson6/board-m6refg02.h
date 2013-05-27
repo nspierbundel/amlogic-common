@@ -1,5 +1,5 @@
 /*
- * customer/boards/board-m6skt.h
+ * customer/boards/board-m6refg02.h
  *
  * Copyright (C) 2011-2012 Amlogic, Inc.
  *
@@ -17,8 +17,8 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
-#ifndef __MACH_MESON6_BOARD_SKT_H
-#define __MACH_MESON6_BOARD_SKT_H
+#ifndef __MACH_MESON6_BOARD_REFG02_H
+#define __MACH_MESON6_BOARD_REFG02_H
 
 #include <asm/page.h>
 
