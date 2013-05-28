@@ -11,17 +11,11 @@
 # For each arch check: CROSS_COMPILE , KDIR , CFLAGS += -DARCH
 
 export ARCH ?= arm
+BUILD ?= debug
+
 TARGET_PLATFORM ?= aml-meson
 CONFIG ?= aml-meson-m400-1
 BUILD ?= debug
-
-check_cc2 = \
-	$(shell if $(1) -S -o /dev/null -xc /dev/null > /dev/null 2>&1; \
-	then \
-		echo "$(2)"; \
-	else \
-		echo "$(3)"; \
-	fi ;)
 
 # Check that required parameters are supplied.
 ifeq ($(CONFIG),)
@@ -38,8 +32,8 @@ endif
 KDIR-$(shell uname -m):=/lib/modules/$(shell uname -r)/build
 
 ifeq ($(ARCH), arm)
-# when compiling for ARM we're cross compiling
-export CROSS_COMPILE ?= $(call check_cc2, arm-linux-gnueabi-gcc, arm-linux-gnueabi-, arm-none-linux-gnueabi-)
+	# when compiling for ARM we're cross compiling
+	export CROSS_COMPILE ?= arm-none-linux-gnueabi-
 endif
 
 # look up KDIR based om CPU selection

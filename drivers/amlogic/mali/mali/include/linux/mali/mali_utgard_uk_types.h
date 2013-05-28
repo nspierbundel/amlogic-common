@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2013 ARM Limited. All rights reserved.
+ * Copyright (C) 2010-2012 ARM Limited. All rights reserved.
  * 
  * This program is free software and is provided to you under the terms of the GNU General Public License version 2
  * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
@@ -68,8 +68,6 @@ typedef enum
     _MALI_UK_POST_NOTIFICATION,           /**< _mali_ukk_post_notification() */
 	_MALI_UK_GET_USER_SETTING,       /**< _mali_ukk_get_user_setting() *//**< [out] */
 	_MALI_UK_GET_USER_SETTINGS,       /**< _mali_ukk_get_user_settings() *//**< [out] */
-	_MALI_UK_STREAM_CREATE,           /**< _mali_ukk_stream_create() */
-	_MALI_UK_FENCE_VALIDATE,          /**< _mali_ukk_fence_validate() */
 
 	/** Memory functions */
 
@@ -89,7 +87,6 @@ typedef enum
     _MALI_UK_MAP_EXT_MEM,                    /**< _mali_uku_map_external_mem() */
     _MALI_UK_UNMAP_EXT_MEM,                  /**< _mali_uku_unmap_external_mem() */
     _MALI_UK_VA_TO_MALI_PA,                  /**< _mali_uku_va_to_mali_pa() */
-    _MALI_UK_MEM_WRITE_SAFE,                 /**< _mali_uku_mem_write_safe() */
 
     /** Common functions for each core */
 
@@ -420,12 +417,9 @@ typedef struct
 
 #define _MALI_PP_MAX_WB_REGISTERS ((0x02C/4)+1)
 
-#define _MALI_DLBU_MAX_REGISTERS 4
-
 /** Flag for _mali_uk_pp_start_job_s */
 #define _MALI_PP_JOB_FLAG_NO_NOTIFICATION (1<<0)
 #define _MALI_PP_JOB_FLAG_BARRIER         (1<<1)
-#define _MALI_PP_JOB_FLAG_FENCE           (1<<2)
 
 /** @defgroup _mali_uk_ppstartjob_s Fragment Processor Start Job
  * @{ */
@@ -482,7 +476,6 @@ typedef struct
     u32 wb0_registers[_MALI_PP_MAX_WB_REGISTERS];
     u32 wb1_registers[_MALI_PP_MAX_WB_REGISTERS];
     u32 wb2_registers[_MALI_PP_MAX_WB_REGISTERS];
-	u32 dlbu_registers[_MALI_DLBU_MAX_REGISTERS]; /**< [in] Dynamic load balancing unit registers */
 	u32 num_cores;                      /**< [in] Number of cores to set up (valid range: 1-4) */
     u32 perf_counter_flag;              /**< [in] bitmask indicating which performance counters to enable, see \ref _MALI_PERFORMANCE_COUNTER_FLAG_SRC0_ENABLE and related macro definitions */
     u32 perf_counter_src0;              /**< [in] source id for performance counter 0 (see ARM DDI0415A, Table 3-60) */
@@ -490,10 +483,6 @@ typedef struct
 	u32 frame_builder_id;               /**< [in] id of the originating frame builder */
 	u32 flush_id;                       /**< [in] flush id within the originating frame builder */
 	u32 flags;                          /**< [in] See _MALI_PP_JOB_FLAG_* for a list of avaiable flags */
-	s32 fence;                          /**< [in,out] Fence to wait on / fence that will be signalled on job completion, if _MALI_PP_JOB_FLAG_FENCE is set */
-	s32 stream;                         /**< [in] Steam identifier */
-	u32 num_memory_cookies;             /**< [in] number of memory cookies attached to job */
-	u32 *memory_cookies;                /**< [in] memory cookies attached to job  */
 } _mali_uk_pp_start_job_s;
 /** @} */ /* end group _mali_uk_ppstartjob_s */
 
@@ -711,7 +700,7 @@ typedef struct
  * The 16bit integer is stored twice in a 32bit integer
  * For example, for version 1 the value would be 0x00010001
  */
-#define _MALI_API_VERSION 20
+#define _MALI_API_VERSION 17
 #define _MALI_UK_API_VERSION _MAKE_VERSION_ID(_MALI_API_VERSION)
 
 /**
@@ -880,16 +869,6 @@ typedef struct
 	u32 size;                       /**< [in,out] Size of the range, in bytes. */
 } _mali_uk_va_to_mali_pa_s;
 
-/**
- * @brief Arguments for _mali_uk[uk]_mem_write_safe()
- */
-typedef struct
-{
-	void *ctx;        /**< [in,out] user-kernel context (trashed on output) */
-	const void *src;  /**< [in]     Pointer to source data */
-	void *dest;       /**< [in]     Destination Mali buffer */
-	u32 size;         /**< [in,out] Number of bytes to write/copy on input, number of bytes actually written/copied on output */
-} _mali_uk_mem_write_safe_s;
 
 typedef struct
 {
@@ -1104,35 +1083,6 @@ typedef struct
 } _mali_uk_sw_counters_report_s;
 
 /** @} */ /* end group _mali_uk_sw_counters_report */
-
-/** @defgroup _mali_uk_stream U/K Mali stream module
- * @{ */
-
-/** @brief Create stream
- */
-typedef struct
-{
-	void *ctx;                      /**< [in,out] user-kernel context (trashed on output) */
-	int fd;                         /**< [out] file descriptor describing stream */
-} _mali_uk_stream_create_s;
-
-/** @brief Destroy stream
-*/
-typedef struct
-{
-	void *ctx;                      /**< [in,out] user-kernel context (trashed on output) */
-	int fd;                         /**< [in] file descriptor describing stream */
-} _mali_uk_stream_destroy_s;
-
-/** @brief Check fence validity
- */
-typedef struct
-{
-	void *ctx;                      /**< [in,out] user-kernel context (trashed on output) */
-	int fd;                         /**< [in] file descriptor describing fence */
-} _mali_uk_fence_validate_s;
-
-/** @} */ /* end group _mali_uk_stream */
 
 /** @} */ /* end group u_k_api */
 

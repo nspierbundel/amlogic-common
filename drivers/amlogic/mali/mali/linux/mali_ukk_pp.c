@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, 2012-2013 ARM Limited. All rights reserved.
+ * Copyright (C) 2010, 2012 ARM Limited. All rights reserved.
  * 
  * This program is free software and is provided to you under the terms of the GNU General Public License version 2
  * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
@@ -19,18 +19,12 @@
 int pp_start_job_wrapper(struct mali_session_data *session_data, _mali_uk_pp_start_job_s __user *uargs)
 {
 	_mali_osk_errcode_t err;
-	int fence = -1;
 
 	MALI_CHECK_NON_NULL(uargs, -EINVAL);
 	MALI_CHECK_NON_NULL(session_data, -EINVAL);
 
-	err = _mali_ukk_pp_start_job(session_data, uargs, &fence);
+	err = _mali_ukk_pp_start_job(session_data, uargs);
 	if (_MALI_OSK_ERR_OK != err) return map_errcode(err);
-
-	if (-1 != fence)
-	{
-		if (0 != put_user(fence, &uargs->fence)) return -EFAULT;
-	}
 
 	return 0;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010-2013 ARM Limited. All rights reserved.
+ * Copyright (C) 2010-2012 ARM Limited. All rights reserved.
  * 
  * This program is free software and is provided to you under the terms of the GNU General Public License version 2
  * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
@@ -69,12 +69,10 @@ struct mali_pmu_core *mali_pmu_create(_mali_osk_resource_t *resource, u32 number
 void mali_pmu_delete(struct mali_pmu_core *pmu)
 {
 	MALI_DEBUG_ASSERT_POINTER(pmu);
-	MALI_DEBUG_ASSERT(pmu == mali_global_pmu_core);
-	MALI_DEBUG_PRINT(2, ("Mali PMU: Deleting Mali PMU core\n"));
 
 	mali_hw_core_delete(&pmu->hw_core);
 	_mali_osk_free(pmu);
-	mali_global_pmu_core = NULL;
+	pmu = NULL;
 }
 
 _mali_osk_errcode_t mali_pmu_reset(struct mali_pmu_core *pmu)
@@ -96,13 +94,14 @@ _mali_osk_errcode_t mali_pmu_powerdown_all(struct mali_pmu_core *pmu)
 	mali_hw_core_register_write(&pmu->hw_core, PMU_REG_ADDR_MGMT_POWER_DOWN, pmu->mali_registered_cores_power_mask);
 
 	/* Wait for cores to be powered down (100 x 100us = 100ms) */
-	timeout = MALI_REG_POLL_COUNT_SLOW ;
+	timeout = 100;
 	do
 	{
 		/* Get status of sleeping cores */
 		stat = mali_hw_core_register_read(&pmu->hw_core, PMU_REG_ADDR_MGMT_STATUS);
 		stat &= pmu->mali_registered_cores_power_mask;
 		if( stat == pmu->mali_registered_cores_power_mask ) break; /* All cores we wanted are now asleep */
+		_mali_osk_time_ubusydelay(100);
 		timeout--;
 	} while( timeout > 0 );
 
@@ -126,17 +125,18 @@ _mali_osk_errcode_t mali_pmu_powerup_all(struct mali_pmu_core *pmu)
 	mali_hw_core_register_write(&pmu->hw_core, PMU_REG_ADDR_MGMT_POWER_UP, pmu->mali_registered_cores_power_mask);
 
 	/* Wait for cores to be powered up (100 x 100us = 100ms) */
-	timeout = MALI_REG_POLL_COUNT_SLOW;
+	timeout = 100;
 	do
 	{
 		/* Get status of sleeping cores */
 		stat = mali_hw_core_register_read(&pmu->hw_core,PMU_REG_ADDR_MGMT_STATUS);
 		stat &= pmu->mali_registered_cores_power_mask;
-		if ( stat == 0 ) break; /* All cores we wanted are now awake */
+		if( stat == 0 ) break; /* All cores we wanted are now awake */
+		_mali_osk_time_ubusydelay(100);
 		timeout--;
-	} while ( timeout > 0 );
+	} while( timeout > 0 );
 
-	if ( timeout == 0 )
+	if( timeout == 0 )
 	{
 		return _MALI_OSK_ERR_TIMEOUT;
 	}

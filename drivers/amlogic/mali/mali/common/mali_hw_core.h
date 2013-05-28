@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2013 ARM Limited. All rights reserved.
+ * Copyright (C) 2011-2012 ARM Limited. All rights reserved.
  * 
  * This program is free software and is provided to you under the terms of the GNU General Public License version 2
  * as published by the Free Software Foundation, and any use by you of this program is subject to the terms of such GNU licence.
@@ -26,8 +26,8 @@ struct mali_hw_core
 	const char* description;          /**< Name of unit (as specified in device configuration) */
 };
 
-#define MALI_REG_POLL_COUNT_FAST 1000
-#define MALI_REG_POLL_COUNT_SLOW 1000000
+#define MALI_HW_CORE_NO_COUNTER     ((u32)-1)
+#define MALI_HW_CORE_INVALID_VALUE  ((u32)-1)
 
 _mali_osk_errcode_t mali_hw_core_create(struct mali_hw_core *core, const _mali_osk_resource_t *resource, u32 reg_size);
 void mali_hw_core_delete(struct mali_hw_core *core);
