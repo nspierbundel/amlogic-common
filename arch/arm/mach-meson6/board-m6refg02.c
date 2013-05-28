@@ -1062,9 +1062,9 @@ static void m6ref_hdmi_5v_ctrl(unsigned int pwr)
 }
 
 static struct hdmi_phy_set_data brd_phy_data[] = {
-    {27, 0x16, 0x30},   // 480i/p 576i/p
-    {74, 0x16, 0x40},   // 720p 1080i
-    {148, 0x16, 0x40},  // 1080p
+//    {27, 0x16, 0x30},   // 480i/p 576i/p
+//    {74, 0x16, 0x40},   // 720p 1080i
+//    {148, 0x16, 0x40},  // 1080p
     {-1,   -1},         //end of phy setting
 };
 

@@ -53,8 +53,9 @@
 #define B32BpP  (4)
 #define DOUBLE_BUFFER   (2)
 
-#define OSD1_MAX_MEM        U_ALIGN(OSD_PANEL_PIX*B32BpP*DOUBLE_BUFFER)
-#define OSD2_MAX_MEM        U_ALIGN(32*32*B32BpP)
+#define OSD1_MAX_MEM        U_ALIGN(OSD_1080_PIX*B32BpP*DOUBLE_BUFFER)
+//#define OSD2_MAX_MEM        U_ALIGN(32*32*B32BpP)
+#define OSD2_MAX_MEM        U_ALIGN(OSD_1080_PIX*B32BpP*DOUBLE_BUFFER)
 
 /******** Reserved memory configuration ***************/
 #define OSD1_ADDR_START     U_ALIGN(AUDIODSP_ADDR_END )
@@ -64,7 +65,7 @@
 
 /******** OSD3 OSD4 begin ***************/
 #if defined(CONFIG_AM_FB_EXT)
-#define OSD3_MAX_MEM        U_ALIGN(OSD_PANEL_PIX*B32BpP*DOUBLE_BUFFER)
+#define OSD3_MAX_MEM        U_ALIGN(OSD_1080_PIX*B32BpP*DOUBLE_BUFFER)
 #define OSD4_MAX_MEM        U_ALIGN(32*32*B32BpP)
 
 #define OSD3_ADDR_START     U_ALIGN(OSD2_ADDR_END)
