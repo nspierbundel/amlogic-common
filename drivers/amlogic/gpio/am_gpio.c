@@ -53,10 +53,9 @@ int gpio_out_status(char *name,int bit,uint32_t ghigh)
 {
 	bool high;
 		uint32_t pin;
-		char p[5] = "GPIO";
-		char cmd[10];	
-		sprintf(&cmd,"%s%s_%d",p,name,bit);
-		pin = get_pin_num(&cmd);
+		char cmd[10];
+		sprintf(cmd,"GPIO%s_%d",name,bit);
+		pin = get_pin_num(cmd);
 		printk(KERN_DEBUG "cmd=%s pin = %d ghigh = %d\n",cmd,pin,ghigh);
 		if(pin != -1){
 			if(ghigh == 1){
@@ -77,8 +76,9 @@ int gpio_out_status(char *name,int bit,uint32_t ghigh)
 		}
 		else{
 			printk(KERN_ERR "you input error!\n");
-			return -1;	
+			return -1;
 		}
+	return 0;
 }
 static inline int _gpio_run_cmd(const char *ex_cmd, cmd_t *op)
 {
@@ -170,7 +170,11 @@ static ssize_t am_gpio_read(struct file *file, char __user *buf, size_t size,lof
 		
 		if (buf == NULL || op == NULL)
 			return -1;
-				copy_from_user(tmp, buf, size);
+				val = copy_from_user(tmp, buf, size);
+				if (0 > val) {
+				    printk("am_gpio_read: Some bytes could not be copied: %d\n", val);
+				    return -EFAULT;
+				}
 				
 				strcpy(cmd, "r ");
 				strcat(cmd, tmp);
@@ -192,8 +196,12 @@ static ssize_t am_gpio_write(struct file *file, const char __user *buf,
 		
 		if(buf == NULL || op == NULL)
 			return -1;
-				copy_from_user(tmp, buf, bytes);
-				
+				val = copy_from_user(tmp, buf, bytes);
+				if (0 > val) {
+				    printk("am_gpio_write: Some bytes could not be copied: %d\n", val);
+				    return -EFAULT;
+				}
+				    
 				strcpy(cmd,"w ");
 				strcat(cmd,tmp);
 				val = _gpio_run_cmd(cmd,op);
@@ -202,7 +210,7 @@ static ssize_t am_gpio_write(struct file *file, const char __user *buf,
 						return strlen(cmd);
 }
 
-static int am_gpio_ioctl(struct file *file, unsigned int ctl_cmd, unsigned long arg)
+static long am_gpio_ioctl(struct file *file, unsigned int ctl_cmd, unsigned long arg)
 {
 	cmd_t *op=file->private_data;
 		char cmd[10];
