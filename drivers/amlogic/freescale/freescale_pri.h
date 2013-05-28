@@ -9,7 +9,7 @@ extern int uninit_freescale_device(void);
 extern struct class* init_freescale_cls(void);
 
 /* for thread of freescale. */
-static int start_freescale_task(void);
+//static int start_freescale_task(void);
 extern void stop_freescale_task(void);
 
 /* for freescale private member. */
