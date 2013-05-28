@@ -111,14 +111,14 @@ static audiodsp_pm_state_t pm_state;
 
 static void audiodsp_prevent_sleep(void)
 {
-    struct audiodsp_priv* priv = audiodsp_privdata();
+    //struct audiodsp_priv* priv = audiodsp_privdata();
     printk("audiodsp prevent sleep\n");
     //wake_lock(&priv->wakelock);
 }
 
 static void audiodsp_allow_sleep(void)
 {
-    struct audiodsp_priv *priv=audiodsp_privdata();
+    //struct audiodsp_priv *priv=audiodsp_privdata();
     printk("audiodsp allow sleep\n");
     //wake_unlock(&priv->wakelock);
 }
@@ -213,7 +213,7 @@ static unsigned long audiodsp_drop_pcm(unsigned long size)
 {
 	struct audiodsp_priv *priv = audiodsp_privdata();
 	size_t len;
-	int count;
+	int count = 0;
 	unsigned long drop_bytes = size;
 
 	mutex_lock(&priv->stream_buffer_mutex);
@@ -718,7 +718,7 @@ static ssize_t dsp_working_status_show(struct class* cla, struct class_attribute
     pbuf += sprintf(pbuf, "\tdsp jeffies  0x%lx\n", DSP_RD(DSP_JIFFIES));
     pbuf += sprintf(pbuf, "\tdsp pcm wp  0x%lx\n", DSP_RD(DSP_DECODE_OUT_WD_ADDR));
     pbuf += sprintf(pbuf, "\tdsp pcm rp  0x%lx\n", DSP_RD(DSP_DECODE_OUT_RD_ADDR));
-		 pbuf += sprintf(pbuf, "\tdsp pcm buffer level  0x%lx\n", dsp_codec_get_bufer_data_len(priv));
+		 pbuf += sprintf(pbuf, "\tdsp pcm buffer level  0x%i\n", dsp_codec_get_bufer_data_len(priv));
     pbuf += sprintf(pbuf, "\tdsp pcm buffered size  0x%lx\n", DSP_RD(DSP_BUFFERED_LEN));
     pbuf += sprintf(pbuf, "\tdsp es read offset  0x%lx\n", DSP_RD(DSP_AFIFO_RD_OFFSET1));
 
@@ -861,7 +861,7 @@ static ssize_t dts_dec_control_show(struct class*cla, struct class_attribute* at
 	char *dialnorm[] = {"disable","enable"};	
 	char *pbuf = buf;
 	pbuf += sprintf(pbuf, "\tdts  dmx mode : %s\n", dmxmode[(dts_dec_control>>DTS_DMX_MODE_BIT)&0x1]);
-	pbuf += sprintf(pbuf, "\tdts  drc scale : %d%\n", (dts_dec_control>>DTS_DRC_SCALE_BIT)&0xff);
+	pbuf += sprintf(pbuf, "\tdts  drc scale : %d\n", (dts_dec_control>>DTS_DRC_SCALE_BIT)&0xff);
 	pbuf += sprintf(pbuf, "\tdts  dial norm : %s\n", dialnorm[(dts_dec_control>>DTS_DIAL_NORM_BIT)&0x1]);
 	return (pbuf-buf);
 }
@@ -885,13 +885,13 @@ static ssize_t dts_dec_control_store(struct class* class, struct class_attribute
 		dts_dec_control = (dts_dec_control&(~1))|val;
  	}
  	else if(strncmp(tmpbuf, "dtsdrcscale", 11)==0){
-        val=simple_strtoul(buf+i+1, NULL, 16); 	
+		val=simple_strtoul(buf+i+1, NULL, 16);
 		val = val&0xff;
-		printk("dts drc  scale set to %d%\n",val);
+		printk("dts drc  scale set to %d\n",val);
 		dts_dec_control = (dts_dec_control&(~(0xff<<DTS_DRC_SCALE_BIT)))|(val<<DTS_DRC_SCALE_BIT);
  	}
  	else if(strncmp(tmpbuf, "dtsdialnorm", 11)==0){
-        val=simple_strtoul(buf+i+1, NULL, 16); 	
+		val=simple_strtoul(buf+i+1, NULL, 16);
 		val = val&0x1;
 		printk("dts  dial norm : set to %s\n",dialnorm[val]);
 		dts_dec_control = (dts_dec_control&(~(0x1<<DTS_DIAL_NORM_BIT)))|(val<<DTS_DIAL_NORM_BIT);
@@ -941,12 +941,12 @@ static struct class_attribute audiodsp_attrs[]={
 #ifdef CONFIG_PM
 static int audiodsp_suspend(struct device* dev, pm_message_t state)
 {
-     struct audiodsp_priv *priv = audiodsp_privdata();
-#if 0	 
+#if 0
+    struct audiodsp_priv *priv = audiodsp_privdata();
     if(wake_lock_active(&priv->wakelock)){
         return -1; // please stop dsp first
     }
-#endif	
+#endif
     pm_state.event = state.event;
     if(state.event == PM_EVENT_SUSPEND){
         // should sleep cpu2 here after RevC chip
