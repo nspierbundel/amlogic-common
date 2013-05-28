@@ -637,14 +637,6 @@ static struct platform_device meson_card_device = {
     },
 };
 
-/**
- *  Some Meson6 socket board has card detect issue.
- *  Force card detect success for socket board.
- */
-static int meson_mmc_detect(void)
-{
-    return 0;
-}
 #endif // CONFIG_CARDREADER
 
 /***********************************************************************
@@ -1337,92 +1329,6 @@ static struct platform_device input_device_key = {
 };
 #endif
 
-
-
-/***********************************************************************
- * Audio section
- **********************************************************************/
-static struct resource aml_m6_audio_resource[] = {
-    [0] =   {
-        .start      =   0,
-        .end        =   0,
-        .flags      =   IORESOURCE_MEM,
-    },
-};
-
-static struct platform_device aml_audio = {
-    .name           = "aml-audio",
-    .id             = 0,
-};
-
-static struct platform_device aml_audio_dai = {
-    .name           = "aml-dai",
-    .id             = 0,
-};
-
-#if defined(CONFIG_SND_SOC_DUMMY_CODEC)
-static pinmux_item_t dummy_codec_pinmux[] = {
-    /* I2S_MCLK I2S_BCLK I2S_LRCLK I2S_DOUT */
-    {
-        .reg = PINMUX_REG(9),
-        .setmask = (1 << 7) |(1 << 11) | (1 << 10) | (1 << 6)/* (1 << 5) | (1 << 9) | (1 << 4)*/,
-        .clrmask = (7 << 19) | (7 << 1) | (3 << 10) | (1 << 6),
-    },
-    {
-        .reg = PINMUX_REG(8),
-        .clrmask = (0x7f << 24),
-    },
-    /* spdif out from GPIOC_9 */
-    { 
-    .reg = PINMUX_REG(3),
-    .setmask = (1<<24),
-    },
-    /* mask spdif out from GPIOE_8 */
-    {
-    .reg = PINMUX_REG(9),
-    .clrmask = (1<<0),
-    },
-    PINMUX_END_ITEM
-};
-
-static pinmux_set_t dummy_codec_pinmux_set = {
-    .chip_select = NULL,
-    .pinmux = &dummy_codec_pinmux[0],
-};
-
-static void dummy_codec_device_init(void)
-{
-    /* audio pinmux */
-    pinmux_set(&dummy_codec_pinmux_set);
-}
-
-static void dummy_codec_device_deinit(void)
-{
-    pinmux_clr(&dummy_codec_pinmux_set);
-}
-
-
-static struct dummy_codec_platform_data dummy_codec_pdata = {
-    .device_init    = dummy_codec_device_init,
-    .device_uninit  = dummy_codec_device_deinit,
-};
-
-static struct platform_device aml_dummy_codec_audio = {
-    .name           = "aml_dummy_codec_audio",
-    .id             = 0,
-    .resource       = aml_m6_audio_resource,
-    .num_resources  = ARRAY_SIZE(aml_m6_audio_resource),
-    .dev = {
-        .platform_data = &dummy_codec_pdata,
-    },
-};
-
-static struct platform_device aml_dummy_codec = {
-    .name           = "dummy_codec",
-    .id             = 0,
-};
-#endif
-
 /***********************************************************************
  * Device Register Section
  **********************************************************************/
@@ -1456,9 +1362,6 @@ static struct platform_device  *platform_devs[] = {
 #if defined(CONFIG_CARDREADER)
     &meson_card_device,
 #endif // CONFIG_CARDREADER
-#if defined(CONFIG_MMC_AML)
-    &aml_mmc_device,
-#endif
 #if defined(CONFIG_SUSPEND)
     &aml_pm_device,
 #endif
@@ -1468,15 +1371,9 @@ static struct platform_device  *platform_devs[] = {
 #if defined(CONFIG_AML_RTC)
     &aml_rtc_device,
 #endif
-    &aml_audio,
-    &aml_audio_dai,
-#if defined(CONFIG_SND_SOC_DUMMY_CODEC)
-    &aml_dummy_codec_audio,
-    &aml_dummy_codec,
-#endif
 #ifdef CONFIG_SND_AML_M6_AUDIO_CODEC
     &aml_m6_audio,
-#endif    
+#endif
 #ifdef CONFIG_AM_WIFI
     &wifi_power_device,
 #endif
