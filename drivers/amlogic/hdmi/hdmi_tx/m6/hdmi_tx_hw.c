@@ -281,7 +281,7 @@ static void intr_handler(void *arg)
         hdmi_wr_only_reg(OTHER_BASE_ADDR + HDMI_OTHER_INTR_STAT_CLR,  1 << 2); //clear EDID rising interrupt in hdmi module 
     }
     if (!((data32 == 1) || (data32 == 2) || (data32 == 4))) {
-        hdmi_print(1,"HDMI Error: Unkown HDMI Interrupt Source\n");
+        hdmi_print(1,"HDMI Error: Unkown HDMI Interrupt Source, data32 = %x\n", data32);
         hdmi_wr_only_reg(OTHER_BASE_ADDR + HDMI_OTHER_INTR_STAT_CLR,  data32); //clear unkown interrupt in hdmi module 
     }
 //#ifdef AML_A3
