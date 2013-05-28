@@ -1429,6 +1429,9 @@ static __init void meson_init_machine(void)
     aml_set_reg32_bits(AOBUS_REG_ADDR(0x24), 0,  2, 1);
     aml_set_reg32_bits(AOBUS_REG_ADDR(0x24), 1, 18, 1);
 
+    // Enable +5V VCCx2/VCCk
+    gpio_out(PAD_GPIOAO_3, 0);
+
 #ifdef CONFIG_MESON_CS_DCDC_REGULATOR
     vcck_pwm_init();
 #endif
