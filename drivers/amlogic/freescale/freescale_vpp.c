@@ -90,8 +90,8 @@ static DEFINE_MUTEX(freescale_mutex);
 const vframe_receiver_op_t* vf_freescale_reg_provider(void);
 void vf_freescale_unreg_provider(void);
 void vf_freescale_reset(void);
-static void freescale_vf_put_dec(struct vframe_s *vf, void* op_arg);
-static vframe_t *freescale_vf_peek_dec(void* op_arg);
+static void freescale_vf_put_dec(vframe_t *, void*);
+static vframe_t *freescale_vf_peek_dec(void*);
 
 #define to_ppframe(vf)	\
 	container_of(vf, struct ppframe_s, frame)
