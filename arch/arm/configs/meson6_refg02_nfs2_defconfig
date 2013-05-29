@@ -36,8 +36,7 @@ CONFIG_HIGH_RES_TIMERS=y
 CONFIG_AEABI=y
 # CONFIG_OABI_COMPAT is not set
 CONFIG_HIGHMEM=y
-CONFIG_CMDLINE="root=/dev/mtdblock2 rw rootfstype=yaffs2 init=/sbin/init rootwait"
-CONFIG_CMDLINE="console=ttyS0,115200n8 rw mem=1024M rootwait nohlt a9_clk=800M clk81=187500000 root=/dev/mtdblock2 rw rootfstype=yaffs2 init=/sbin/init hdmitx=true mac=00:0d:fe:59:a0:8e"
+CONFIG_CMDLINE="console=ttyS0,115200n8 rw mem=1024M rootwait nohlt a9_clk=800M clk81=187500000 root=/dev/nfs nfsroot=192.168.1.100:/srv/nfs/rootfs ip=dhcp init=/sbin/init hdmitx=true mac=00:0d:fe:59:a0:8e"
 CONFIG_CMDLINE_FORCE=y
 CONFIG_CPU_FREQ=y
 CONFIG_CPU_FREQ_GOV_ONDEMAND=y
