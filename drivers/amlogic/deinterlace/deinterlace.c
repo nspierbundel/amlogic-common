@@ -1025,9 +1025,8 @@ static int list_count(int queue_idx)
     return count;
 }
 
-#define queue_for_each_entry(di_buf, ptm, queue_idx, list)  \
-    list_for_each_entry_safe(di_buf, ptmp, list_head_array[queue_idx], list) 
-
+#define queue_for_each_entry(di_buf, ptmp, queue_idx, list)  \
+    list_for_each_entry_safe(di_buf, ptmp, list_head_array[queue_idx], list)
 #else
 #define MAX_QUEUE_POOL_SIZE   256
 typedef struct queue_s{
