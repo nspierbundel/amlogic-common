@@ -2075,6 +2075,7 @@ static void di_uninit_buf(void)
 
 }
 
+#if 0 
 static void di_clean_in_buf(void)
 {
     di_buf_t *di_buf = NULL, *ptmp;
@@ -2151,7 +2152,7 @@ static void di_clean_in_buf(void)
 		}
     
 }
-
+#endif
 static void log_buffer_state(unsigned char* tag)
 {
     if(di_log_flag&DI_LOG_BUFFER_STATE){
@@ -3578,10 +3579,10 @@ static int do_pre_only_fun(void* arg)
     return 0;    
 }    
 
-static int get_vscale_skip_count(unsigned par)
+static void get_vscale_skip_count(unsigned par)
 {
     di_vscale_skip_count = (par >> 24)&0xff;        
-}    
+}
 
 #define get_vpp_reg_update_flag(par) ((par>>16)&0x1)
 
@@ -4916,7 +4917,10 @@ static int di_task_handle(void *data)
     while (1)
     {
 
-        down_interruptible(&di_sema);
+        if (down_interruptible(&di_sema) == -EINTR) { 
+	    printk("di_task_handle: interrupted.\n");
+	    return -EINTR; 
+	}
         if(active_flag){
             di_unreg_process();
 
@@ -4925,7 +4929,7 @@ static int di_task_handle(void *data)
 #if (!(defined RUN_DI_PROCESS_IN_IRQ))&&(!(defined RUN_DI_PROCESS_IN_TIMER_IRQ))
             di_process();
             log_buffer_state("pro");
-#endif            
+#endif
         }
     }
 
