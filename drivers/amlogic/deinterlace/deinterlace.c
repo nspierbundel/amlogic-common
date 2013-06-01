@@ -5312,7 +5312,7 @@ get_vframe:
 static void di_vf_put(vframe_t *vf, void* arg)
 {
     di_buf_t* di_buf = (di_buf_t*)vf->private_data;
-    ulong flags;
+    ulong flags = 0;
     if((init_flag == 0)||recovery_flag){
 #ifdef DI_DEBUG
         di_print("%s: %x\n", __func__, vf);
