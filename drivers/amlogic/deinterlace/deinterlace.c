@@ -390,16 +390,20 @@ static int dump_state_flag = 0;
 
 static ssize_t store_dbg(struct device * dev, struct device_attribute *attr, const char * buf, size_t count)
 {
+    di_buf_t* di_buf_tmp;
+    vframe_t* vf;
+    int idx;
+
     if(strncmp(buf, "buf", 3)==0){
-        di_buf_t* di_buf_tmp = (di_buf_t*)simple_strtoul(buf+3,NULL,16);
+        di_buf_tmp = (di_buf_t*)simple_strtoul(buf+3,NULL,16);
         dump_di_buf(di_buf_tmp);
     }
     else if(strncmp(buf, "vframe", 6)==0){
-        vframe_t* vf = (di_buf_t*)simple_strtoul(buf+6,NULL,16);
+        vf = (di_buf_t*)simple_strtoul(buf+6,NULL,16);
         dump_vframe(vf);
     }
     else if(strncmp(buf, "pool", 4)==0){
-        int idx = simple_strtoul(buf+4,NULL,10);
+        idx = simple_strtoul(buf+4,NULL,10);
         dump_pool(idx);
     }
     else if(strncmp(buf, "state", 4)==0){
@@ -1289,6 +1293,7 @@ static void queue_out(di_buf_t* di_buf)
 
 static void queue_in(di_buf_t* di_buf, int queue_idx)
 {
+    queue_t* q;
     if(di_buf == NULL){
 #ifdef DI_DEBUG
         printk("%s:Error\n", __func__);    
@@ -1313,7 +1318,7 @@ static void queue_in(di_buf_t* di_buf, int queue_idx)
         recovery_flag++;
         return;
     }
-    queue_t* q = &(queue[queue_idx]);
+    q = &(queue[queue_idx]);
 #ifdef DI_DEBUG
     if(di_log_flag&DI_LOG_QUEUE){
         di_print("%s:<%d:%d,%d,%d> %x\n", __func__,queue_idx, q->num, q->in_idx, q->out_idx,di_buf);
@@ -1592,7 +1597,9 @@ static void di_apply_reg_cfg(unsigned char pre_post_type)
 
 static void dis2_di(void)
 {
-                    ulong fiq_flag;
+#ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
+                ulong fiq_flag;
+#endif
                 ulong flags;
                 init_flag = 0;
                 raw_local_save_flags(fiq_flag);
@@ -1991,15 +1998,14 @@ static void di_uninit_buf(void)
 {
     di_buf_t *p = NULL, *ptmp;
     int i, ii=0;
-		int itmp;
+    int itmp;
 
     vframe_t* cur_vf = get_cur_dispbuf();
 
-		for(i=0; i<USED_LOCAL_BUF_MAX; i++){
-    	used_local_buf_index[i] = -1;
-		}
-		used_post_buf_index = -1;
-
+    for(i=0; i<USED_LOCAL_BUF_MAX; i++){
+	used_local_buf_index[i] = -1;
+    }
+    used_post_buf_index = -1;
 
     queue_for_each_entry(p, ptmp, QUEUE_DISPLAY, list) {
         if(p->di_buf[0]->type!=VFRAME_TYPE_IN){
@@ -2163,7 +2169,9 @@ static void log_buffer_state(unsigned char* tag)
         int recycle = 0;
         int di_inp = 0;
         int di_wr = 0;
-        ulong fiq_flag;
+#ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
+                ulong fiq_flag;
+#endif
         raw_local_save_flags(fiq_flag);
         local_fiq_disable();
         in_free = list_count(QUEUE_IN_FREE);
@@ -2224,10 +2232,10 @@ static void log_buffer_state(unsigned char* tag)
 
 static void dump_di_buf(di_buf_t* di_buf)
 {
-    printk("di_buf 0x%x vframe 0x%x:\n", di_buf, di_buf->vframe);
-    printk("index %d, post_proc_flag %d, new_format_flag %d, type %d, seq %d, pre_ref_count %d, post_ref_count %d, queue_index %d pulldown_mode\n",
-        di_buf->index, di_buf->post_proc_flag, di_buf->new_format_flag, di_buf->type, di_buf->seq, di_buf->pre_ref_count, 
-        di_buf->post_ref_count, di_buf->queue_index, di_buf->pulldown_mode);
+    printk("di_buf 0x%x vframe 0x%x:\n", (unsigned int)di_buf, (unsigned int)di_buf->vframe);
+    printk("index %d, post_proc_flag %d, new_format_flag %d, type %d, seq %d, pre_ref_count %d, post_ref_count %d, queue_index %d pulldown_mode %d\n",
+        (unsigned int)di_buf->index, (unsigned int)di_buf->post_proc_flag, (unsigned int)di_buf->new_format_flag, (unsigned int)di_buf->type, (unsigned int)di_buf->seq, (unsigned int)di_buf->pre_ref_count,
+        (unsigned int)di_buf->post_ref_count, (unsigned int)di_buf->queue_index, (unsigned int)di_buf->pulldown_mode);
     printk("di_buf: 0x%x, 0x%x, di_buf_dup_p: 0x%x, 0x%x, 0x%x, 0x%x, 0x%x\n",
         di_buf->di_buf[0],di_buf->di_buf[1],di_buf->di_buf_dup_p[0],di_buf->di_buf_dup_p[1],di_buf->di_buf_dup_p[2],di_buf->di_buf_dup_p[3],di_buf->di_buf_dup_p[4]);
     printk("nr_adr 0x%x, nr_canvas_idx 0x%x, mtn_adr 0x%x, mtn_canvas_idx 0x%x",
@@ -2267,7 +2275,7 @@ static void dump_vframe(vframe_t* vf)
             vf->right_eye.start_x, vf->right_eye.start_y, vf->right_eye.width, vf->right_eye.height);
 #endif
     printk("mode_3d_enable %d, early_process_fun 0x%x, process_fun 0x%x, private_data 0x%x\n",
-            vf->mode_3d_enable, vf->early_process_fun, vf->process_fun, vf->private_data);
+            (unsigned int)vf->mode_3d_enable, (unsigned int)vf->early_process_fun, (unsigned int)vf->process_fun, (unsigned int)vf->private_data);
     printk("pixel_ratio %d list 0x%x\n",
             vf->pixel_ratio, vf->list); 
 
@@ -2550,8 +2558,9 @@ static void config_di_mif(DI_MIF_t* di_mif, di_buf_t*di_buf)
 static void pre_de_process(void)
 {
   int chan2_field_num = 1;
+#ifdef NEW_DI
   int cont_rd = 1;
-
+#endif
 #ifdef DI_DEBUG
     di_print("%s: start\n", __func__);
 #endif
@@ -2714,7 +2723,9 @@ static void pre_de_process(void)
 
 static void pre_de_done_buf_config(void)
 {
-    ulong fiq_flag;
+#ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
+                ulong fiq_flag;
+#endif
     if(di_pre_stru.di_wr_buf){
         read_pulldown_info(&(di_pre_stru.di_wr_buf->field_pd_info),
                             &(di_pre_stru.di_wr_buf->win_pd_info[0])
@@ -2939,6 +2950,10 @@ static unsigned char pre_de_buf_config(void)
     di_buf_t* di_buf = NULL;
     vframe_t* vframe;
     int i;
+#ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
+    ulong fiq_flag;
+#endif
+
     if((queue_empty(QUEUE_IN_FREE)&&(di_pre_stru.process_count==0))||
         queue_empty(QUEUE_LOCAL_FREE)){
         return 0;
@@ -3076,7 +3091,6 @@ static unsigned char pre_de_buf_config(void)
                         di_pre_stru.same_field_source_flag++;
 
                     if(skip_wrong_field && is_from_vdin(di_buf->vframe)){
-                        ulong fiq_flag;
                         raw_local_save_flags(fiq_flag);
                         local_fiq_disable();
 
@@ -4021,7 +4035,9 @@ static int process_post_vframe(void)
    2) get buf from pre_ready_list, attach it to buf from post_free_list
         (it will be send to recycle_list in di_vf_put() )
 */
+#ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
     ulong fiq_flag;
+#endif
     int i,pulldown_mode_hise;
     int ret = 0;
     int buffer_keep_count = 3;
@@ -4668,8 +4684,10 @@ di task
 */
 static void di_unreg_process(void)
 {
+#ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
     ulong flags;
     ulong fiq_flag;
+#endif
         if((di_pre_stru.unreg_req_flag||di_pre_stru.force_unreg_req_flag||di_pre_stru.disable_req_flag)&&
             (di_pre_stru.pre_de_busy==0)){
             //printk("===unreg_req_flag\n");
@@ -4716,8 +4734,10 @@ unreg:
 
 static void di_reg_process(void)
 {
+#ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
     ulong flags;
     ulong fiq_flag;
+#endif
     vframe_t * vframe;
 
     if(init_flag == 0){
@@ -4784,8 +4804,11 @@ di_set_para_by_tvinfo(vframe);
 
 static void di_process(void)
 {
+#ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
     ulong flags;
     ulong fiq_flag;
+#endif
+
 	/* add for di Reg re-init */
 	//di_set_para_by_tvinfo(vframe);
 	  di_process_cnt++;
@@ -4913,7 +4936,7 @@ static int di_task_handle(void *data)
 
 static irqreturn_t timer_irq(int irq, void *dev_instance)
 {
-   unsigned int data32;
+//   unsigned int data32;
    int i;
 #ifdef RUN_DI_PROCESS_IN_TIMER_IRQ
     if(di_pre_stru.pre_de_busy){
@@ -5327,7 +5350,7 @@ static void di_vf_put(vframe_t *vf, void* arg)
 
 static int di_event_cb(int type, void *data, void *private_data)
 {
-    int i;
+    // int i;
     if(type == VFRAME_EVENT_RECEIVER_FORCE_UNREG){
 #ifdef DI_DEBUG
         di_print("%s: VFRAME_EVENT_RECEIVER_FORCE_UNREG\n", __func__);
