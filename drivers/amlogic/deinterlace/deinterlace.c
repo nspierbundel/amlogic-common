@@ -258,7 +258,7 @@ static void di_uninit_buf(void);
 static unsigned char is_bypass(void);
 static void log_buffer_state(unsigned char* tag);
 u32 get_blackout_policy(void);
-static void put_get_disp_buf(void);
+//static void put_get_disp_buf(void);
 
 static const struct vframe_receiver_op_s di_vf_receiver =
 {
@@ -399,7 +399,7 @@ static ssize_t store_dbg(struct device * dev, struct device_attribute *attr, con
         dump_di_buf(di_buf_tmp);
     }
     else if(strncmp(buf, "vframe", 6)==0){
-        vf = (di_buf_t*)simple_strtoul(buf+6,NULL,16);
+        vf = (vframe_t*)simple_strtoul(buf+6,NULL,16);
         dump_vframe(vf);
     }
     else if(strncmp(buf, "pool", 4)==0){
@@ -1365,7 +1365,7 @@ static int list_count(int queue_idx)
     return queue[queue_idx].num;
 }
 
-static bool queue_empty(queue_idx)
+static bool queue_empty(int queue_idx)
 {
     return (queue[queue_idx].num == 0);
 }
@@ -1999,7 +1999,7 @@ static void di_uninit_buf(void)
     int i, ii=0;
     int itmp;
 
-    vframe_t* cur_vf = get_cur_dispbuf();
+    // vframe_t* cur_vf = get_cur_dispbuf();
 
     for(i=0; i<USED_LOCAL_BUF_MAX; i++){
 	used_local_buf_index[i] = -1;
