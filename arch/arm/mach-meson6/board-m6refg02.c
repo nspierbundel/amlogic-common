@@ -86,10 +86,10 @@
 #include <linux/efuse.h>
 #endif
 
-#define CONFIG_SND_SOC_DUMMY_CODEC
-#ifdef CONFIG_SND_SOC_DUMMY_CODEC
+#if defined(CONFIG_SND_AML_SOC)
 #include <sound/dummy_codec.h>
 #endif
+
 #ifdef CONFIG_AM_WIFI
 #include <plat/wifi_power.h>
 #endif
@@ -598,14 +598,6 @@ static struct platform_device amlogic_spi_nor_device = {
 /***********************************************************************
 * Audio section
 **********************************************************************/
-static struct resource aml_m6_audio_resource[] = {
-    [0] = {
-        .start = 0,
-        .end = 0,
-        .flags = IORESOURCE_MEM,
-    },
-};
-
 static struct platform_device aml_audio = {
     .name = "aml-audio",
     .id = 0,
@@ -616,7 +608,15 @@ static struct platform_device aml_audio_dai = {
     .id = 0,
 };
 
-#if defined(CONFIG_SND_SOC_DUMMY_CODEC)
+#if defined(CONFIG_SND_AML_SOC)
+static struct resource aml_m6_audio_resource[] = {
+    [0] = {
+        .start = 0,
+        .end = 0,
+        .flags = IORESOURCE_MEM,
+    },
+};
+
 static pinmux_item_t dummy_codec_pinmux[] = {
     /* I2S_MCLK I2S_BCLK I2S_LRCLK I2S_DOUT */
     {
@@ -632,6 +632,7 @@ static pinmux_item_t dummy_codec_pinmux[] = {
     {
         .reg = PINMUX_REG(3),
         .setmask = (1<<24),
+
     },
     /* mask spdif out from GPIOE_8 */
     {
@@ -649,14 +650,15 @@ static pinmux_set_t dummy_codec_pinmux_set = {
 static void dummy_codec_device_init(void)
 {
     /* audio pinmux */
+    printk("Audio: Init pinmux.\n");
     pinmux_set(&dummy_codec_pinmux_set);
 }
 
 static void dummy_codec_device_deinit(void)
 {
+    printk("Audio: Deinit pinmux.\n");
     pinmux_clr(&dummy_codec_pinmux_set);
 }
-
 
 static struct dummy_codec_platform_data dummy_codec_pdata = {
     .device_init = dummy_codec_device_init,
@@ -1576,7 +1578,7 @@ static struct platform_device  *platform_devs[] = {
 #endif
     &aml_audio,
     &aml_audio_dai,
-#if defined(CONFIG_SND_SOC_DUMMY_CODEC)
+#if defined(CONFIG_SND_AML_SOC)
     &aml_dummy_codec_audio,
     &aml_dummy_codec,
 #endif
