@@ -608,78 +608,15 @@ static struct platform_device aml_audio_dai = {
     .id = 0,
 };
 
-#if defined(CONFIG_SND_AML_SOC)
-static struct resource aml_m6_audio_resource[] = {
-    [0] = {
-        .start = 0,
-        .end = 0,
-        .flags = IORESOURCE_MEM,
-    },
-};
-
-static pinmux_item_t dummy_codec_pinmux[] = {
-    /* I2S_MCLK I2S_BCLK I2S_LRCLK I2S_DOUT */
-    {
-        .reg = PINMUX_REG(9),
-        .setmask = (1 << 7) | (1 << 5) | (1 << 9) | (1 << 4),
-        .clrmask = (7 << 19) | (7 << 1) | (3 << 10) | (1 << 6),
-    },
-    {
-        .reg = PINMUX_REG(8),
-        .clrmask = (0x7f << 24),
-    },
-    /* spdif out from GPIOC_9 */
-    {
-        .reg = PINMUX_REG(3),
-        .setmask = (1<<24),
-
-    },
-    /* mask spdif out from GPIOE_8 */
-    {
-        .reg = PINMUX_REG(9),
-        .clrmask = (1<<0),
-    },
-    PINMUX_END_ITEM
-};
-
-static pinmux_set_t dummy_codec_pinmux_set = {
-    .chip_select = NULL,
-    .pinmux = &dummy_codec_pinmux[0],
-};
-
-static void dummy_codec_device_init(void)
+static void __init spdif_pinmux_init(void)
 {
-    /* audio pinmux */
-    printk("Audio: Init pinmux.\n");
-    pinmux_set(&dummy_codec_pinmux_set);
+	printk("SPDIF output.\n");
+	// PAD,GPIOC_9,0x2012 bit[9],0x2013 bit[9],0x2014 bit[9],,,,,,,,SPDIF_out REG3[24],,,,,ENC_17 REG7[17],PWM_C REG3[25],,TCON_7_A REG0[19],,,,,,,,,,,,,,,,,,,,,,,,
+	CLEAR_CBUS_REG_MASK(PERIPHS_PIN_MUX_0,(1<<19)); // Disable TCON_7_A
+	CLEAR_CBUS_REG_MASK(PERIPHS_PIN_MUX_3,(1<<25)); // Disable PWM_C
+	CLEAR_CBUS_REG_MASK(PERIPHS_PIN_MUX_7,(1<<17)); // Disable ENC_17
+	  SET_CBUS_REG_MASK(PERIPHS_PIN_MUX_3,(1<<24)); // Enable  SPDIF_out
 }
-
-static void dummy_codec_device_deinit(void)
-{
-    printk("Audio: Deinit pinmux.\n");
-    pinmux_clr(&dummy_codec_pinmux_set);
-}
-
-static struct dummy_codec_platform_data dummy_codec_pdata = {
-    .device_init = dummy_codec_device_init,
-    .device_uninit = dummy_codec_device_deinit,
-};
-
-static struct platform_device aml_dummy_codec_audio = {
-    .name = "aml_dummy_codec_audio",
-    .id = 0,
-    .resource = aml_m6_audio_resource,
-    .num_resources = ARRAY_SIZE(aml_m6_audio_resource),
-    .dev = {
-        .platform_data = &dummy_codec_pdata,
-    },
-};
-
-static struct platform_device aml_dummy_codec = {
-    .name = "dummy_codec",
-    .id = 0,
-};
-#endif
 
 /***********************************************************************
  * Card Reader Section
@@ -1578,18 +1515,11 @@ static struct platform_device  *platform_devs[] = {
 #endif
     &aml_audio,
     &aml_audio_dai,
-#if defined(CONFIG_SND_AML_SOC)
-    &aml_dummy_codec_audio,
-    &aml_dummy_codec,
-#endif
 #ifdef CONFIG_AM_WIFI
     &wifi_power_device,
 #endif
 #if defined(CONFIG_TVIN_VDIN)
     &vdin_device,
-#endif
-#if 0 //defined(CONFIG_TVIN_BT656IN)
-    &bt656in_device,
 #endif
 #ifdef CONFIG_AM_REMOTE
     &meson_device_remote,
@@ -1604,7 +1534,7 @@ static struct platform_device  *platform_devs[] = {
     &deinterlace_device,
 #endif
 #ifdef CONFIG_FREE_SCALE
-        &freescale_device,
+    &freescale_device,
 #endif 
 #ifdef CONFIG_MESON_CS_DCDC_REGULATOR
     &meson_cs_dcdc_regulator_device,
@@ -1626,24 +1556,20 @@ static struct platform_device  *platform_devs[] = {
 
 static __init void meson_init_machine(void)
 {
+	int reg_val;
 //    meson_cache_init();
 
-    /**
-     *  Meson6 socket board ONLY
-     *  Do *NOT* merge for other BSP
-     */
-    aml_set_reg32_bits(AOBUS_REG_ADDR(0x24), 0,  3, 1);
-    aml_set_reg32_bits(AOBUS_REG_ADDR(0x24), 1, 19, 1);
-    aml_set_reg32_bits(AOBUS_REG_ADDR(0x24), 0,  2, 1);
-    aml_set_reg32_bits(AOBUS_REG_ADDR(0x24), 1, 18, 1);
-
+	printk("PSU: Enable.");
+    // Enable +3V3 VCCIO
+    gpio_out(PAD_GPIOAO_2, 1);	
     // Enable +5V VCCx2/VCCk
     gpio_out(PAD_GPIOAO_3, 0);
 
-#ifdef CONFIG_MESON_CS_DCDC_REGULATOR
-    vcck_pwm_init();
-#endif
-
+	printk("GPIOD_5: High.");
+	// GPIO D_5,  (21-16) = 5, Unknown what is does. Whitout it, ATV1200 has random crashes on boot.
+    CLEAR_CBUS_REG_MASK(PREG_PAD_GPIO2_EN_N, (1<<21));
+    SET_CBUS_REG_MASK(PREG_PAD_GPIO2_O, (1<<21));
+	
 #ifdef CONFIG_AM_ETHERNET
     setup_eth_device();
 #endif
@@ -1651,6 +1577,7 @@ static __init void meson_init_machine(void)
 #ifdef CONFIG_AML_HDMI_TX
     setup_hdmi_dev_platdata(&aml_hdmi_pdata);
 #endif
+	spdif_pinmux_init();
 #ifdef CONFIG_AM_REMOTE
     setup_remote_device();
 #endif
@@ -1670,13 +1597,12 @@ static __init void meson_init_machine(void)
     }
 #endif
 
-    CLEAR_CBUS_REG_MASK(PREG_PAD_GPIO2_EN_N, (1<<21));
-    SET_CBUS_REG_MASK(PREG_PAD_GPIO2_O, (1<<21));
+
 
 #if defined(CONFIG_I2C_AML) || defined(CONFIG_I2C_HW_AML)
     aml_i2c_init();
 #endif
-    
+   
 }
 static __init void meson_init_early(void)
 {
