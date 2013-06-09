@@ -2575,15 +2575,8 @@ static int hdmitx_m3_set_audmode(struct hdmi_tx_dev_s* hdmitx_device, Hdmi_tx_au
         case FS_48K:
             audio_N_para = 6144 * 2;
             break;
-	case FS_REFER_TO_STREAM:
-	case FS_32K:
-	case FS_88K2:
-	case FS_96K:
-	case FS_176K4:
-	case FS_192K:
-	case FS_MAX:
-	    audio_N_para = 6272 * 2;
-	    break;
+        default:
+            break;
     }
 
     //TODO. Different audio type, maybe have different settings
