@@ -900,9 +900,9 @@ static int usb_wifi_power(int is_power)
     CLEAR_CBUS_REG_MASK(PERIPHS_PIN_MUX_0,(1<<18));
     CLEAR_CBUS_REG_MASK(PREG_PAD_GPIO2_EN_N, (1<<5));
     if (is_power)//is_power
-        SET_CBUS_REG_MASK(PREG_PAD_GPIO2_O, (1<<5));
-    else
         CLEAR_CBUS_REG_MASK(PREG_PAD_GPIO2_O, (1<<5));
+    else
+        SET_CBUS_REG_MASK(PREG_PAD_GPIO2_O, (1<<5));
     return 0;
 }
 
