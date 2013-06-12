@@ -1272,130 +1272,7 @@ static struct hdmi_config_platform_data aml_hdmi_pdata = {
     .phy_data = brd_phy_data,
 };
 #endif
-/***********************************************************************
- * Meson CS DCDC section
- **********************************************************************/
-#ifdef CONFIG_MESON_CS_DCDC_REGULATOR
-#include <mach/voltage.h>
-#include <linux/regulator/meson_cs_dcdc_regulator.h>
-#include <linux/regulator/machine.h>
-static struct regulator_consumer_supply vcck_data[] = {
-    {
-        .supply = "vcck-armcore",
-    },
-};
 
-static struct regulator_init_data vcck_init_data = {
-    .constraints = { /* VCCK default 1.2V */
-        .name = "vcck",
-        .min_uV =  972000,
-        .max_uV =  1253000,
-        .valid_ops_mask = REGULATOR_CHANGE_VOLTAGE | REGULATOR_CHANGE_STATUS,
-    },
-    .num_consumer_supplies = ARRAY_SIZE(vcck_data),
-    .consumer_supplies = vcck_data,
-};
-
-// pwm duty for vcck voltage
-static unsigned int vcck_pwm_table[MESON_CS_MAX_STEPS] = {
-    0x0c001c, 0x0c001c, 0x0c001c, 0x0c001c, 
-    0x100018, 0x100018, 0x100018, 0x100018, 
-    0x180010, 0x180010, 0x180010, 0x180010, 
-    0x230005, 0x230005, 0x230005, 0x230005, 
-};
-static int get_voltage() {
-//    printk("***vcck: get_voltage");
-    int i;
-    unsigned int reg = aml_read_reg32(P_PWM_PWM_C);
-    for(i=0; i<MESON_CS_MAX_STEPS; i++) {
-        if(reg == vcck_pwm_table[i])
-         break;
-    }
-    if(i >= MESON_CS_MAX_STEPS)
-        return -1;
-    else 
-        return i;
-}
-
-static int set_voltage(unsigned int level) {
-//    printk("***vcck: set_voltage");
-    aml_write_reg32(P_PWM_PWM_C, vcck_pwm_table[level]);
-
-}
-
-static void vcck_pwm_init() {
-    printk("***vcck: vcck_pwm_init");
-    //enable pwm clk & pwm output
-    aml_write_reg32(P_PWM_MISC_REG_CD, (aml_read_reg32(P_PWM_MISC_REG_CD) & ~(0x7f << 8)) | ((1 << 15) | (0 << 8) | (1 << 0)));
-    aml_write_reg32(P_PWM_PWM_C, vcck_pwm_table[0]);
-    //enable pwm_C pinmux    1<<3 pwm_D
-    aml_write_reg32(P_PERIPHS_PIN_MUX_2, aml_read_reg32(P_PERIPHS_PIN_MUX_2) | (1 << 2));
-}
-
-static struct meson_cs_pdata_t vcck_pdata = {
-    .meson_cs_init_data = &vcck_init_data,
-    .voltage_step_table = {
-/*        1209000, 1192000, 1176000, 1159000,
-        1143000, 1127000, 1110000, 1094000,
-        1077000, 1061000, 1044000, 1028000,
-        1012000, 996000,  979000,  962000,
-*/
-    1253000, 1253000, 1253000,1253000,
-    1203000, 1203000, 1203000, 1203000, 
-    1107000, 1107000, 1107000, 1107000, 
-    972000,   972000,   972000,   972000, 	
-    },
-    .default_uV = 1451000,
-    .get_voltage = get_voltage,
-    .set_voltage = set_voltage,
-};
-
-static struct meson_opp vcck_opp_table[] = {
-    /* freq must be in descending order */
-    {
-        .freq   = 1500000,
-        .min_uV = 1253000,
-        .max_uV = 1253000,
-    },
-    {
-        .freq   = 1320000,
-        .min_uV = 1253000,
-        .max_uV = 1253000,
-    },
-    {
-        .freq   = 1200000,
-        .min_uV = 1253000,
-        .max_uV = 1253000,
-    },
-    {
-        .freq   = 1080000,
-        .min_uV = 1203000,
-        .max_uV = 1203000,
-    },
-    {
-        .freq   = 840000,
-        .min_uV = 1203000,
-        .max_uV = 1203000,
-    },
-    {
-        .freq   = 600000,
-        .min_uV = 1107000,
-        .max_uV = 1107000,
-    },
-    {
-        .freq   = 200000,
-        .min_uV = 972000,
-        .max_uV = 972000,
-    }
-};
-
-static struct platform_device meson_cs_dcdc_regulator_device = {
-    .name = "meson-cs-regulator",
-    .dev = {
-        .platform_data = &vcck_pdata,
-    }
-};
-#endif
 /***********************************************************************
  * Meson CPUFREQ section
  **********************************************************************/
@@ -1403,53 +1280,18 @@ static struct platform_device meson_cs_dcdc_regulator_device = {
 #include <linux/cpufreq.h>
 #include <plat/cpufreq.h>
 
-#ifdef CONFIG_MESON_CS_DCDC_REGULATOR
-#include <mach/voltage.h>
-static struct regulator *vcck;
-static struct meson_cpufreq_config cpufreq_info;
-
-static unsigned int vcck_cur_max_freq(void)
-{
-    return meson_vcck_cur_max_freq(vcck, vcck_opp_table, ARRAY_SIZE(vcck_opp_table));
-}
-
-static int vcck_scale(unsigned int frequency)
-{
-    return meson_vcck_scale(vcck, vcck_opp_table, ARRAY_SIZE(vcck_opp_table), frequency);
-}
-
-static int vcck_regulator_init(void)
-{
-    vcck = regulator_get(NULL, vcck_data[0].supply);
-    if (WARN(IS_ERR(vcck), "Unable to obtain voltage regulator for vcck;"
-                    " voltage scaling unsupported\n")) {
-        return PTR_ERR(vcck);
-    }
-
-    return 0;
-}
-
-static struct meson_cpufreq_config cpufreq_info = {
-    .freq_table = NULL,
-    .init = vcck_regulator_init,
-    .cur_volt_max_freq = vcck_cur_max_freq,
-    .voltage_scale = vcck_scale,
-};
-#endif //CONFIG_MESON_CS_DCDC_REGULATOR
-
-
 static struct platform_device meson_cpufreq_device = {
     .name   = "cpufreq-meson",
     .dev = {
-#ifdef CONFIG_MESON_CS_DCDC_REGULATOR
-        .platform_data = &cpufreq_info,
-#else
         .platform_data = NULL,
-#endif
     },
     .id = -1,
 };
 #endif //CONFIG_CPU_FREQ
+
+/***********************************************************************
+ * Power Key Section
+ **********************************************************************/
 
 #ifdef CONFIG_SARADC_AM
 #include <linux/saradc.h>
@@ -1468,8 +1310,6 @@ static struct platform_device saradc_device = {
 
 static struct adc_key adc_kp_key[] = {
     {KEY_POWER,    "power", CHAN_4, 0, 40},
-//    {KEY_VOLUMEDOWN,    "vol-", CHAN_4, 150, 40},
-//    {KEY_VOLUMEUP,      "vol+", CHAN_4, 275, 40},
 };
 
 static struct adc_kp_platform_data adc_kp_pdata = {
@@ -1487,10 +1327,6 @@ static struct platform_device adc_kp_device = {
     }
 };
 #endif
-
-/***********************************************************************
- * Power Key Section
- **********************************************************************/
 
 
 #if defined(CONFIG_KEY_INPUT_CUSTOM_AM) || defined(CONFIG_KEY_INPUT_CUSTOM_AM_MODULE)
@@ -1603,14 +1439,8 @@ static struct platform_device  *platform_devs[] = {
 #ifdef CONFIG_FREE_SCALE
     &freescale_device,
 #endif 
-#ifdef CONFIG_MESON_CS_DCDC_REGULATOR
-    &meson_cs_dcdc_regulator_device,
-#endif
 #ifdef CONFIG_CPU_FREQ
     &meson_cpufreq_device,
-#endif
-#ifdef CONFIG_BT_DEVICE  
-    &bt_device,
 #endif
 };
 
@@ -1623,66 +1453,58 @@ static struct platform_device  *platform_devs[] = {
 
 static __init void meson_init_machine(void)
 {
-	int reg_val;
-//    meson_cache_init();
-
 	printk("PSU: Enable.");
-    // Enable +3V3 VCCIO
-    gpio_out(PAD_GPIOAO_2, 1);	
-    // Enable +5V VCCx2/VCCk
-    gpio_out(PAD_GPIOAO_3, 0);
+	/// Enable +3V3 VCCIO
+	gpio_out(PAD_GPIOAO_2, 1);
+	// Enable +5V VCCx2/VCCk
+	gpio_out(PAD_GPIOAO_3, 0);
 
 	printk("GPIOD_5: High.");
-	// GPIO D_5,  (21-16) = 5, Unknown what is does. Whitout it, ATV1200 has random crashes on boot.
-    CLEAR_CBUS_REG_MASK(PREG_PAD_GPIO2_EN_N, (1<<21));
-    SET_CBUS_REG_MASK(PREG_PAD_GPIO2_O, (1<<21));
-	
+	// GPIO D_5,  (21-16) = 5, Unknown what this does. Whitout it, ATV1200 has random crashes on boot.
+	CLEAR_CBUS_REG_MASK(PREG_PAD_GPIO2_EN_N, (1<<21));
+	SET_CBUS_REG_MASK(PREG_PAD_GPIO2_O, (1<<21));
+
 #ifdef CONFIG_AM_ETHERNET
-    setup_eth_device();
+	setup_eth_device();
 #endif
 
 #ifdef CONFIG_AML_HDMI_TX
-    setup_hdmi_dev_platdata(&aml_hdmi_pdata);
+	setup_hdmi_dev_platdata(&aml_hdmi_pdata);
 #endif
 
 #ifdef CONFIG_AM_REMOTE
-    setup_remote_device();
+	setup_remote_device();
 #endif
 #ifdef CONFIG_EFUSE
-    setup_aml_efuse();
+	setup_aml_efuse();
 #endif
-    setup_usb_devices();
-    setup_devices_resource();
-    platform_add_devices(platform_devs, ARRAY_SIZE(platform_devs));
+	setup_usb_devices();
+	setup_devices_resource();
+	platform_add_devices(platform_devs, ARRAY_SIZE(platform_devs));
 #ifdef CONFIG_AM_WIFI_USB
-    if(wifi_plat_data.usb_set_power)
-        wifi_plat_data.usb_set_power(1);//power off built-in usb wifi
+	if(wifi_plat_data.usb_set_power)
+	    wifi_plat_data.usb_set_power(1);//power off built-in usb wifi
 #endif
 #if defined(CONFIG_SUSPEND)
-    {//todo: remove it after verified. need set it in uboot environment variable.
-    console_suspend_enabled = 0;
-    }
+	//todo: remove it after verified. need set it in uboot environment variable.
+	console_suspend_enabled = 0;
 #endif
-
-
-
 #if defined(CONFIG_I2C_AML) || defined(CONFIG_I2C_HW_AML)
-    aml_i2c_init();
+	aml_i2c_init();
 #endif
-   
+
 }
 static __init void meson_init_early(void)
 {
     ///boot seq 1
-
 }
 
 MACHINE_START(MESON6_REFG02, "Amlogic Meson6 G02 reference board")
-	.boot_params    = BOOT_PARAMS_OFFSET,
-	.map_io     = meson_map_io,///2
-	.init_early = meson_init_early,///3
-	.init_irq   = meson_init_irq,///0
-	.timer      = &meson_sys_timer,
-	.init_machine   = meson_init_machine,
-	.fixup      = meson_fixup,///1
+	.boot_params  = BOOT_PARAMS_OFFSET,
+	.map_io       = meson_map_io,///2
+	.init_early   = meson_init_early,///3
+	.init_irq     = meson_init_irq,///0
+	.timer        = &meson_sys_timer,
+	.init_machine = meson_init_machine,
+	.fixup        = meson_fixup,///1
 MACHINE_END
