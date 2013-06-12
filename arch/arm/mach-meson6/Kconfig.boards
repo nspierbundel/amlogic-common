@@ -16,6 +16,8 @@ config MACH_MESON6_REF
 
 config MACH_MESON6_REFG02
 	depends on ARCH_MESON6
+	select SND_AML_SOC
+	select SND_AML_M_DUMMY_CODEC
 	bool "Meson6 reference board G02"
 	default y 
 	help
