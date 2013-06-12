@@ -1384,6 +1384,9 @@ static struct platform_device  *platform_devs[] = {
 #endif
     &aml_uart_device,
     &meson_device_fb,
+#ifdef CONFIG_AM_FB_EXT
+    &meson_device_fb_ext,
+#endif
     &meson_device_vout,
 #ifdef CONFIG_AM_STREAMING
     &meson_device_codec,
