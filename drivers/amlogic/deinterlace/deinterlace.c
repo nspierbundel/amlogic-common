@@ -63,16 +63,19 @@
 //#define RUN_DI_PROCESS_IN_TIMER
 
 #if MESON_CPU_TYPE >= MESON_CPU_TYPE_MESON6
-#ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
-#define FIQ_VSYNC
+    #ifdef CONFIG_AML_VSYNC_FIQ_ENABLE
+	#define FIQ_VSYNC
+    #else
+	#undef FIQ_VSYNC
+    #endif
+	#undef raw_local_save_flags
+	#undef local_fiq_disable
+	#undef raw_local_irq_restore
+    #define raw_local_save_flags(fiq_flag) fiq_flag=0
+    #define local_fiq_disable()
+    #define raw_local_irq_restore(fiq_flag) fiq_flag=0
 #else
-#undef FIQ_VSYNC
-#endif
-#define raw_local_save_flags(fiq_flag) 
-#define local_fiq_disable()
-#define raw_local_irq_restore(fiq_flag)
-#else
-#define FIQ_VSYNC
+    #define FIQ_VSYNC
 #endif
 
 #ifdef FIQ_VSYNC
@@ -259,7 +262,7 @@ static void di_uninit_buf(void);
 static unsigned char is_bypass(void);
 static void log_buffer_state(unsigned char* tag);
 u32 get_blackout_policy(void);
-static void put_get_disp_buf(void);
+//static void put_get_disp_buf(void);
 
 static const struct vframe_receiver_op_s di_vf_receiver =
 {
@@ -396,7 +399,7 @@ static ssize_t store_dbg(struct device * dev, struct device_attribute *attr, con
         dump_di_buf(di_buf_tmp);
     }
     else if(strncmp(buf, "vframe", 6)==0){
-        vframe_t* vf = (di_buf_t*)simple_strtoul(buf+6,NULL,16);
+        vframe_t* vf = (vframe_t*)simple_strtoul(buf+6,NULL,16);
         dump_vframe(vf);
     }
     else if(strncmp(buf, "pool", 4)==0){
@@ -1022,7 +1025,7 @@ static int list_count(int queue_idx)
     return count;
 }
 
-#define queue_for_each_entry(di_buf, ptm, queue_idx, list)  \
+#define queue_for_each_entry(di_buf, ptmp, queue_idx, list)  \
     list_for_each_entry_safe(di_buf, ptmp, list_head_array[queue_idx], list) 
 
 #else
@@ -1041,9 +1044,10 @@ struct di_buf_pool_s{
     unsigned int size;    
 }di_buf_pool[VFRAME_TYPE_NUM];
 
-#define queue_for_each_entry(di_buf, ptm, queue_idx, list)  \
+#define queue_for_each_entry(di_buf, ptmp, queue_idx, list)  \
+	ptmp = NULL; \
     for(itmp=0; ((di_buf = get_di_buf(queue_idx, &itmp))!=NULL); )
-        
+     
 static void queue_init(int local_buffer_num)
 {
     int i, j;
@@ -1290,6 +1294,7 @@ static void queue_out(di_buf_t* di_buf)
 
 static void queue_in(di_buf_t* di_buf, int queue_idx)
 {
+    queue_t* q;
     if(di_buf == NULL){
 #ifdef DI_DEBUG
         printk("%s:Error\n", __func__);    
@@ -1314,7 +1319,7 @@ static void queue_in(di_buf_t* di_buf, int queue_idx)
         recovery_flag++;
         return;
     }
-    queue_t* q = &(queue[queue_idx]);
+    q = &(queue[queue_idx]);
 #ifdef DI_DEBUG
     if(di_log_flag&DI_LOG_QUEUE){
         di_print("%s:<%d:%d,%d,%d> %x\n", __func__,queue_idx, q->num, q->in_idx, q->out_idx,di_buf);
@@ -1362,7 +1367,7 @@ static int list_count(int queue_idx)
     return queue[queue_idx].num;
 }
 
-static bool queue_empty(queue_idx)
+static bool queue_empty(int queue_idx)
 {
     return (queue[queue_idx].num == 0);
 }
@@ -1667,7 +1672,7 @@ static void di_apply_reg_cfg(unsigned char pre_post_type)
 
 static void dis2_di(void)
 {
-                    ulong fiq_flag;
+                ulong fiq_flag;
                 ulong flags;
                 init_flag = 0;
                 raw_local_save_flags(fiq_flag);
@@ -1691,7 +1696,7 @@ static void dis2_di(void)
                 }
                 di_uninit_buf();
                 raw_local_irq_restore(fiq_flag);
-                spin_unlock_irqrestore(&plist_lock, flags);            
+                spin_unlock_irqrestore(&plist_lock, flags);
 }
 
 static ssize_t store_config(struct device * dev, struct device_attribute *attr, const char * buf, size_t count)
@@ -2080,14 +2085,13 @@ static void di_uninit_buf(void)
 {
     di_buf_t *p = NULL, *ptmp;
     int i, ii=0;
-		int itmp;
-    
-    vframe_t* cur_vf = get_cur_dispbuf();
+    int itmp;
+    // vframe_t* cur_vf = get_cur_dispbuf();
 
-		for(i=0; i<USED_LOCAL_BUF_MAX; i++){
-    	used_local_buf_index[i] = -1;
-		}
-		used_post_buf_index = -1;
+    for(i=0; i<USED_LOCAL_BUF_MAX; i++){
+	used_local_buf_index[i] = -1;
+    }
+    used_post_buf_index = -1;
 
 
     queue_for_each_entry(p, ptmp, QUEUE_DISPLAY, list) {
@@ -2159,6 +2163,7 @@ static void di_uninit_buf(void)
 
 }
 
+#if 0
 static void di_clean_in_buf(void)
 {
     di_buf_t *di_buf = NULL, *ptmp;
@@ -2235,24 +2240,26 @@ static void di_clean_in_buf(void)
 		}
     
 }
+#endif
 
 static void log_buffer_state(unsigned char* tag)
 {
+	di_buf_t *p = NULL, *ptmp;
+	int itmp;
+	int in_free = 0;
+	int local_free = 0;
+	int pre_ready = 0;
+	int post_free = 0;
+	int post_ready = 0;
+	int post_ready_ext = 0;
+	int display = 0;
+	int display_ext = 0;
+	int recycle = 0;
+	int di_inp = 0;
+	int di_wr = 0;
+	ulong fiq_flag;
+
     if(di_log_flag&DI_LOG_BUFFER_STATE){
-        di_buf_t *p = NULL, *ptmp;
-        int itmp;
-        int in_free = 0;
-        int local_free = 0;
-        int pre_ready = 0;
-        int post_free = 0;
-        int post_ready = 0;
-        int post_ready_ext = 0;
-        int display = 0;
-        int display_ext = 0;
-        int recycle = 0;
-        int di_inp = 0;
-        int di_wr = 0;
-        ulong fiq_flag;
         raw_local_save_flags(fiq_flag);
         local_fiq_disable();
         in_free = list_count(QUEUE_IN_FREE);
@@ -2293,8 +2300,8 @@ static void log_buffer_state(unsigned char* tag)
 				if(buf_state_log_start){	
 	        di_print("[%s]i %d, i_f %d/%d, l_f %d/%d, pre_r %d, post_f %d/%d, post_r (%d:%d), disp (%d:%d),rec %d, di_i %d, di_w %d\r\n",
 	            tag,
-	            provider_vframe_level,
-	            in_free,MAX_IN_BUF_NUM,
+	            (unsigned int)provider_vframe_level,
+	            (unsigned int)in_free,MAX_IN_BUF_NUM,
 	            local_free, local_buf_num,
 	            pre_ready,
 	            post_free, MAX_POST_BUF_NUM,
@@ -2313,17 +2320,36 @@ static void log_buffer_state(unsigned char* tag)
 
 static void dump_di_buf(di_buf_t* di_buf)
 {
-    printk("di_buf 0x%x vframe 0x%x:\n", di_buf, di_buf->vframe);
-    printk("index %d, post_proc_flag %d, new_format_flag %d, type %d, seq %d, pre_ref_count %d, post_ref_count %d, queue_index %d pulldown_mode\n",
-        di_buf->index, di_buf->post_proc_flag, di_buf->new_format_flag, di_buf->type, di_buf->seq, di_buf->pre_ref_count, 
-        di_buf->post_ref_count, di_buf->queue_index, di_buf->pulldown_mode);
+    printk("di_buf 0x%x vframe 0x%x:\n", 
+		(unsigned int)di_buf, 
+		(unsigned int)di_buf->vframe);
+    printk("index %d, post_proc_flag %d, new_format_flag %d, type %d, seq %d, pre_ref_count %d, post_ref_count %d, queue_index %d pulldown_mode %d\n",
+        (unsigned int)di_buf->index, 
+		(unsigned int)di_buf->post_proc_flag, 
+		(unsigned int)di_buf->new_format_flag, 
+		(unsigned int)di_buf->type, 
+		(unsigned int)di_buf->seq, 
+		(unsigned int)di_buf->pre_ref_count, 
+        (unsigned int)di_buf->post_ref_count,
+		(unsigned int)di_buf->queue_index, 
+		(unsigned int)di_buf->pulldown_mode);
     printk("di_buf: 0x%x, 0x%x, di_buf_dup_p: 0x%x, 0x%x, 0x%x, 0x%x, 0x%x\n",
-        di_buf->di_buf[0],di_buf->di_buf[1],di_buf->di_buf_dup_p[0],di_buf->di_buf_dup_p[1],di_buf->di_buf_dup_p[2],di_buf->di_buf_dup_p[3],di_buf->di_buf_dup_p[4]);
+        (unsigned int)di_buf->di_buf[0],
+		(unsigned int)di_buf->di_buf[1],
+		(unsigned int)di_buf->di_buf_dup_p[0],
+		(unsigned int)di_buf->di_buf_dup_p[1],
+		(unsigned int)di_buf->di_buf_dup_p[2],
+		(unsigned int)di_buf->di_buf_dup_p[3],
+		(unsigned int)di_buf->di_buf_dup_p[4]);
     printk("nr_adr 0x%x, nr_canvas_idx 0x%x, mtn_adr 0x%x, mtn_canvas_idx 0x%x",
-        di_buf->nr_adr, di_buf->nr_canvas_idx, di_buf->mtn_adr, di_buf->mtn_canvas_idx);
+        (unsigned int)di_buf->nr_adr, 
+		(unsigned int)di_buf->nr_canvas_idx, 
+		(unsigned int)di_buf->mtn_adr, 
+		(unsigned int)di_buf->mtn_canvas_idx);
 #ifdef NEW_DI    
     printk("cnt_adr 0x%x, cnt_canvas_idx 0x%x\n",
-        di_buf->cnt_adr, di_buf->cnt_canvas_idx);
+        (unsigned int)di_buf->cnt_adr, 
+		(unsigned int)di_buf->cnt_canvas_idx);
 #endif    
 }    
 
@@ -2344,21 +2370,47 @@ static void dump_pool(int index)
 
 static void dump_vframe(vframe_t* vf)
 {
-    printk("vframe 0x%x:\n", vf);
+    printk("vframe 0x%x:\n", (unsigned int)vf);
     printk("index %d, type 0x%x, type_backup 0x%x, blend_mode %d, duration %d, duration_pulldown %d, pts %d, flag 0x%x\n",
-            vf->index, vf->type, vf->type_backup, vf->blend_mode, vf->duration, vf->duration_pulldown, vf->pts, vf->flag);
+            (unsigned int)vf->index, 
+			(unsigned int)vf->type, 
+			(unsigned int)vf->type_backup, 
+			(unsigned int)vf->blend_mode, 
+			(unsigned int)vf->duration, 
+			(unsigned int)vf->duration_pulldown, 
+			(unsigned int)vf->pts, vf->flag);
     printk("canvas0Addr 0x%x, canvas1Addr 0x%x, bufWidth %d, width %d, height %d, ratio_control 0x%x, orientation 0x%x, source_type %d, phase %d, soruce_mode %d, sig_fmt %d\n",
-            vf->canvas0Addr, vf->canvas1Addr, vf->bufWidth, vf->width, vf->height, vf->ratio_control, vf->orientation,
-            vf->source_type, vf->phase, vf->source_mode, vf->sig_fmt);
+            (unsigned int)vf->canvas0Addr, 
+			(unsigned int)vf->canvas1Addr, 
+			(unsigned int)vf->bufWidth, 
+			(unsigned int)vf->width, 
+			(unsigned int)vf->height, 
+			(unsigned int)vf->ratio_control, 
+			(unsigned int)vf->orientation,
+            (unsigned int)vf->source_type, 
+			(unsigned int)vf->phase, 
+			(unsigned int)vf->source_mode, 
+			(unsigned int)vf->sig_fmt);
 #ifdef CONFIG_POST_PROCESS_MANAGER_3D_PROCESS
     printk("trans_fmt 0x%x, left_eye(%d %d %d %d), right_eye(%d %d %d %d)\n", 
-            vf->trans_fmt, vf->left_eye.start_x, vf->left_eye.start_y, vf->left_eye.width, vf->left_eye.height,
-            vf->right_eye.start_x, vf->right_eye.start_y, vf->right_eye.width, vf->right_eye.height);
+            (unsigned int)vf->trans_fmt, 
+			(unsigned int)vf->left_eye.start_x, 
+			(unsigned int)vf->left_eye.start_y, 
+			(unsigned int)vf->left_eye.width, 
+			(unsigned int)vf->left_eye.height,
+            (unsigned int)vf->right_eye.start_x, 
+			(unsigned int)vf->right_eye.start_y, 
+			(unsigned int)vf->right_eye.width, 
+			(unsigned int)vf->right_eye.height);
 #endif
     printk("mode_3d_enable %d, early_process_fun 0x%x, process_fun 0x%x, private_data 0x%x\n",
-            vf->mode_3d_enable, vf->early_process_fun, vf->process_fun, vf->private_data);
-    printk("pixel_ratio %d list 0x%x\n",
-            vf->pixel_ratio, vf->list); 
+            vf->mode_3d_enable, 
+			(unsigned int)vf->early_process_fun, 
+			(unsigned int)vf->process_fun, 
+			(unsigned int)vf->private_data);
+    printk("pixel_ratio %d list 0x%lx\n",
+            vf->pixel_ratio, 
+			vf->list); 
 
 }
 
@@ -2380,13 +2432,18 @@ static void print_di_buf(di_buf_t* di_buf, int format)
     else if(format == 2){
         if(di_buf){
             printk("index %d, 0x%x(vframe 0x%x), type %d, vframetype 0x%x, trans_fmt %u,duration %d pts %d\n", 
-                    di_buf->index, (unsigned int)di_buf, di_buf->vframe, di_buf->type, di_buf->vframe->type, 
+				di_buf->index,
+				(unsigned int)di_buf, 
+				(unsigned int)di_buf->vframe, 
+				(unsigned int)di_buf->type, 
+				(unsigned int)di_buf->vframe->type, 
 #ifdef CONFIG_POST_PROCESS_MANAGER_3D_PROCESS
-                        di_buf->vframe->trans_fmt,
+				di_buf->vframe->trans_fmt,
 #else
-                        0,
+				0,
 #endif                        
-                        di_buf->vframe->duration, di_buf->vframe->pts);
+				di_buf->vframe->duration, 
+				(unsigned int)di_buf->vframe->pts);
         }
         
     }   
@@ -2402,13 +2459,17 @@ static void dump_state(void)
     printk("version %s, provider vframe level %d, init_flag %d, is_bypass %d, receiver_is_amvideo %d\n", 
         version_s, provider_vframe_level, init_flag, is_bypass(), receiver_is_amvideo);
     printk("recovery_flag = %d, recovery_log_reason=%d, recovery_log_queue_idx=%d, recovery_log_di_buf=0x%x\n",
-        recovery_flag, recovery_log_reason, recovery_log_queue_idx, recovery_log_di_buf);
+        recovery_flag, recovery_log_reason, recovery_log_queue_idx, (unsigned int)recovery_log_di_buf);
 
-    printk("new_keep_last_frame_enable %d, used_post_buf_index %d(0x%x), used_local_buf_index:\n", new_keep_last_frame_enable,
-        used_post_buf_index, (used_post_buf_index==-1)?NULL:&(di_buf_post[used_post_buf_index]));
+    printk("new_keep_last_frame_enable %d, used_post_buf_index %d(0x%x), used_local_buf_index:\n", 
+		new_keep_last_frame_enable,
+        used_post_buf_index, 
+		(used_post_buf_index==-1) ? 0 : &(di_buf_post[used_post_buf_index]));
 		for(i=0; i<USED_LOCAL_BUF_MAX; i++){
 		    int tmp = used_local_buf_index[i]; 
-    	    printk("%d(0x%x) ",tmp, (tmp==-1)?NULL:&(di_buf_local[tmp]));
+    	    printk("%d(0x%x) ",
+				tmp, 
+				(tmp==-1) ? 0 : &(di_buf_local[tmp]));
 		}
 
     printk("\nin_free_list (max %d):\n", MAX_IN_BUF_NUM);
@@ -2454,10 +2515,10 @@ static void dump_state(void)
     dump_di_pre_stru();
     printk("vframe_in[]:");
     for(i=0; i<MAX_IN_BUF_NUM; i++){
-			  printk("0x%x ",vframe_in[i]);
+			  printk("0x%x ",(unsigned int)vframe_in[i]);
 		}
 		printk("\n");
-    printk("vf_peek()=>%x\n",vf_peek(VFM_NAME));
+    printk("vf_peek()=>%x\n",(unsigned int)vf_peek(VFM_NAME));
     printk("di_process_cnt = %d, video_peek_cnt = %d, force_trig_cnt = %d\n", di_process_cnt, video_peek_cnt, force_trig_cnt);
     dump_state_flag = 0;
     
@@ -2639,7 +2700,9 @@ static void config_di_mif(DI_MIF_t* di_mif, di_buf_t*di_buf)
 static void pre_de_process(void)
 {
   int chan2_field_num = 1;
+#ifdef NEW_DI
   int cont_rd = 1;
+#endif
 
 #ifdef DI_DEBUG
     di_print("%s: start\n", __func__);
@@ -3671,9 +3734,9 @@ static int do_pre_only_fun(void* arg)
     return 0;    
 }    
 
-static int get_vscale_skip_count(unsigned par)
+static void get_vscale_skip_count(unsigned par)
 {
-    di_vscale_skip_count = (par >> 24)&0xff;        
+    di_vscale_skip_count = (par >> 24)&0xff;
 }    
 
 #define get_vpp_reg_update_flag(par) ((par>>16)&0x1)
@@ -4831,7 +4894,9 @@ di task
 */
 static void di_unreg_process(void)
 {
+#if !(defined RUN_DI_PROCESS_IN_IRQ)
     ulong flags;
+#endif
     ulong fiq_flag;
         if((di_pre_stru.unreg_req_flag||di_pre_stru.force_unreg_req_flag||di_pre_stru.disable_req_flag)&&
             (di_pre_stru.pre_de_busy==0)){
@@ -4879,7 +4944,9 @@ unreg:
 
 static void di_reg_process(void)
 {
+#if !(defined RUN_DI_PROCESS_IN_IRQ)
     ulong flags;
+#endif
     ulong fiq_flag;
     vframe_t * vframe;
 
@@ -4947,7 +5014,9 @@ di_set_para_by_tvinfo(vframe);
 
 static void di_process(void)
 {
+#if !(defined RUN_DI_PROCESS_IN_IRQ)
     ulong flags;
+#endif
     ulong fiq_flag;
 	/* add for di Reg re-init */
 	//di_set_para_by_tvinfo(vframe);
@@ -5057,7 +5126,10 @@ static int di_task_handle(void *data)
     while (1)
     {
 
-        down_interruptible(&di_sema);
+        if (down_interruptible(&di_sema)) {
+			printk("di_task_handle: Error down_interruptible.\n");
+			return -EINTR;
+		}
         if(active_flag){
             di_unreg_process();
 
@@ -5076,7 +5148,7 @@ static int di_task_handle(void *data)
 
 static irqreturn_t timer_irq(int irq, void *dev_instance)
 {
-   unsigned int data32;
+   // unsigned int data32;
    int i;
 #ifdef RUN_DI_PROCESS_IN_TIMER_IRQ
     if(di_pre_stru.pre_de_busy){
@@ -5298,6 +5370,7 @@ static void fast_process(void)
 {
 	int i;
 	ulong flags;
+	ulong fiq_flag;
 	if(active_flag&& is_bypass()&&(bypass_get_buf_threshold<=1)&&(init_flag)&&(recovery_flag == 0)&&(dump_state_flag==0)){
         if(vf_peek(VFM_NAME)==NULL){
        	    return;
@@ -5449,7 +5522,7 @@ get_vframe:
 static void di_vf_put(vframe_t *vf, void* arg)
 {
     di_buf_t* di_buf = (di_buf_t*)vf->private_data;
-    ulong flags;
+    ulong flags = 0;
     if((init_flag == 0)||recovery_flag){
 #ifdef DI_DEBUG
         di_print("%s: %x\n", __func__, vf);
@@ -5490,7 +5563,7 @@ static void di_vf_put(vframe_t *vf, void* arg)
 
 static int di_event_cb(int type, void *data, void *private_data)
 {
-    int i;
+    // int i;
     if(type == VFRAME_EVENT_RECEIVER_FORCE_UNREG){
 #ifdef DI_DEBUG
         di_print("%s: VFRAME_EVENT_RECEIVER_FORCE_UNREG\n", __func__);
@@ -5557,7 +5630,7 @@ const static struct file_operations di_fops = {
 
 static int di_probe(struct platform_device *pdev)
 {
-    int r, i;
+    int r, i, ret;
     struct resource *mem;
     int buf_num_avail;
     pr_dbg("di_probe\n");
@@ -5616,15 +5689,35 @@ static int di_probe(struct platform_device *pdev)
         return r;
     }
 
-    device_create_file(di_device.dev, &dev_attr_config);
-    device_create_file(di_device.dev, &dev_attr_debug);
-    device_create_file(di_device.dev, &dev_attr_log);
-    device_create_file(di_device.dev, &dev_attr_parameters);
-    device_create_file(di_device.dev, &dev_attr_status);
+    ret = device_create_file(di_device.dev, &dev_attr_config);
+	if (ret) {	
+		printk("Deinterlaced: Failt to create: dev_attr_config, Err %d\n", ret);
+		return -EFAULT;
+	}
+    ret = device_create_file(di_device.dev, &dev_attr_debug);
+	if (ret) {	
+		printk("Deinterlaced: Failt to create: dev_attr_debug, Err %d\n", ret);
+		return -EFAULT;
+	}
+    ret = device_create_file(di_device.dev, &dev_attr_log);
+	if (ret) {	
+		printk("Deinterlaced: Failt to create: dev_attr_log, Err %d\n", ret);
+		return -EFAULT;
+	}
+    ret = device_create_file(di_device.dev, &dev_attr_parameters);
+	if (ret) {	
+		printk("Deinterlaced: Failt to create: dev_attr_parameters, Err %d\n", ret);
+		return -EFAULT;
+	}
+    ret = device_create_file(di_device.dev, &dev_attr_status);
+	if (ret) {	
+		printk("Deinterlaced: Failt to create: dev_attr_status, Err %d\n", ret);
+		return -EFAULT;
+	}
 
     if (!(mem = platform_get_resource(pdev, IORESOURCE_MEM, 0)))
     {
-    	  pr_error("\ndeinterlace memory resource undefined.\n");
+    	pr_error("\ndeinterlace memory resource undefined.\n");
         return -EFAULT;
     }
 		for(i=0; i<USED_LOCAL_BUF_MAX; i++){
