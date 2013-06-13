@@ -129,7 +129,7 @@ static vframe_t *freescale_vf_get(void* op_arg)
     return vfq_pop(&q_ready);
 }
 
-static void freescale_vf_put(vframe_t *vf)
+static void freescale_vf_put(vframe_t *vf, void* op_arg)
 {
     ppframe_t *pp_vf = to_ppframe(vf);
 
@@ -1291,7 +1291,7 @@ static int freescale_task(void *data)
             vf = vfq_peek(&q_ready);
             while(vf){
                 vf = vfq_pop(&q_ready);
-                freescale_vf_put(vf);
+                freescale_vf_put(vf, NULL);
                 vf = vfq_peek(&q_ready);		            		
             }                  		
          	                      
