@@ -2291,11 +2291,11 @@ void process_3d(vframe_t* vf, ge2d_context_t *context,config_para_ex_t* ge2d_con
 //	
 //}
 
-static void process_field_depth(vframe_t* vf, ge2d_context_t *context,config_para_ex_t* ge2d_config)
-{
-
-}
-
+//static void process_field_depth(vframe_t* vf, ge2d_context_t *context,config_para_ex_t* ge2d_config)
+//{
+//
+//}
+//
 void process_3d_to_2d(vframe_t* vf, ge2d_context_t *context,config_para_ex_t* ge2d_config)
 {
     vframe_t *new_vf;
