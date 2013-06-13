@@ -276,7 +276,7 @@ Hdmi_tx_video_para_t *hdmi_get_video_param(HDMI_Video_Codes_t VideoCode)
 
 static void hdmi_tx_construct_avi_packet(Hdmi_tx_video_para_t *video_param, char* AVI_DB)
 {
-    unsigned char color, bar_info, aspect_ratio, cc, ss, sc, ec;
+    unsigned char color, bar_info, aspect_ratio, cc, ss, sc, ec = 0;
     ss = video_param->ss;
     bar_info = video_param->bar_info;
     if(video_param->color == COLOR_SPACE_YUV444){

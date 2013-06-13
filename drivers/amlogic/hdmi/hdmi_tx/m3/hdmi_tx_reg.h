@@ -22,6 +22,11 @@ void WRITE_APB_REG(unsigned long addr, unsigned long data);
 unsigned long READ_APB_REG(unsigned long addr);
 
 #endif
+
+#undef HDMI_ADDR_PORT
+#undef HDMI_DATA_PORT
+#undef HDMI_CNTL_PORT
+
 #define HDMI_ADDR_PORT 0x2000
 #define HDMI_DATA_PORT 0x2004
 #define HDMI_CNTL_PORT 0x2008
@@ -443,3 +448,4 @@ unsigned long READ_APB_REG(unsigned long addr);
 #define RX_ERROR                3  // Message has been received with error
 
 #endif  // _HDMI_RX_REG_H
+

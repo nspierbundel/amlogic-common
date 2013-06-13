@@ -37,6 +37,8 @@
 #include "hdmi_tx_cec.h"
 //#include "hdmi_cec_key.h"
 
+hdmitx_dev_t *hdmitx_device = NULL;
+
 unsigned int cec_key_flag =0;
 
 __u16 cec_key_map[128] = {
@@ -54,7 +56,7 @@ __u16 cec_key_map[128] = {
     0 , 0, 0, 0, 0, 0, 0, 0,//0x50
     0 , 0, 0, 0, 0, 0, 0, 0,
     KEY_PLAYCD, KEY_PLAYPAUSE, KEY_RECORD, KEY_PAUSECD, KEY_STOPCD, KEY_MUTE, 0, KEY_TUNER,//0x60
-    0 , KEY_MEDIA, 0, 0, KEY_POWER, KEY_POWER, 0, 0,
+    0 , KEY_MEDIA, 0, 0, KEY_POWER, 0, 0, 0,
     0 , KEY_BLUE, KEY_RED, KEY_GREEN, KEY_YELLOW, 0, 0, 0,//0x70
     0 , 0, 0, 0, 0, 0, 0, 0,
 };
@@ -151,22 +153,6 @@ void cec_user_control_released_irq(void)
     //cec_send_event_irq();
 }
 
-void cec_standby_irq(void)
-{
-    if((hdmi_cec_func_config >> CEC_FUNC_MSAK) & 0x1){
-        if((hdmi_cec_func_config>>ONE_TOUCH_STANDBY_MASK) & 0x1)
-        {
-            printk("CEC: System will be in standby mode\n");
-            input_event(remote_cec_dev, EV_KEY, KEY_POWER, 1);
-            input_sync(remote_cec_dev);
-            input_event(remote_cec_dev, EV_KEY, KEY_POWER, 0);
-            input_sync(remote_cec_dev);
-            
-            //cec_send_event_irq();
-        }
-    }
-}
-
 void cec_user_control_pressed(cec_rx_message_t* pcec_message)
 {
     printk("\nCEC Key pressed \n");
@@ -183,11 +169,11 @@ void cec_user_control_released(cec_rx_message_t* pcec_message)
     cec_send_event(pcec_message);
 }
 
+// STANDBY: get STANDBY command from TV
 void cec_standby(cec_rx_message_t* pcec_message)
 {
-    if((hdmi_cec_func_config >> CEC_FUNC_MSAK) & 0x1){
-        if((hdmi_cec_func_config>>ONE_TOUCH_STANDBY_MASK) & 0x1)
-        {
+    if(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)) {
+        if(hdmitx_device->cec_func_config & (1 << ONE_TOUCH_STANDBY_MASK)) {
             printk("CEC: System will be in standby mode\n");
             input_event(remote_cec_dev, EV_KEY, KEY_POWER, 1);
             input_sync(remote_cec_dev);
@@ -198,3 +184,10 @@ void cec_standby(cec_rx_message_t* pcec_message)
         }
     }
 }
+
+void cec_key_init(void)
+{
+    extern hdmitx_dev_t * get_hdmitx_device(void);
+    hdmitx_device = get_hdmitx_device();
+}
+

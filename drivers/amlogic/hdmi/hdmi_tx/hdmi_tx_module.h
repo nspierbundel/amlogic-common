@@ -109,6 +109,9 @@ typedef struct hdmi_tx_dev_s {
     unsigned char tmp_buf[HDMI_TMP_BUF_SIZE];
     unsigned int  log;
     unsigned int  internal_mode_change;
+    unsigned int  cec_func_config;
+    unsigned int  cec_init_ready;
+    unsigned int  tv_cec_support;
 }hdmitx_dev_t;
 
 // HDMI LOG
@@ -131,7 +134,7 @@ typedef struct hdmi_tx_dev_s {
 #endif        
 
 
-#define HDMITX_VER "2013Mar4a"
+#define HDMITX_VER "2013Apr23a"
 
 /************************************
 *    hdmitx protocol level interface

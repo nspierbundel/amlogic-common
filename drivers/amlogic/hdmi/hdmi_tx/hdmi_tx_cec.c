@@ -66,6 +66,7 @@
 //static void remote_cec_tasklet(unsigned long);
 //static int REMOTE_CEC_IRQ = INT_REMOTE;
 //DECLARE_TASKLET_DISABLED(tasklet_cec, remote_cec_tasklet, 0);
+static hdmitx_dev_t *hdmitx_device = NULL;
 struct input_dev *remote_cec_dev;
 DEFINE_SPINLOCK(cec_input_key);
 DEFINE_SPINLOCK(cec_rx_lock);
@@ -77,11 +78,14 @@ static DECLARE_WAIT_QUEUE_HEAD(cec_key_poll);
 
 /* global variables */
 static	unsigned char    gbl_msg[MAX_MSG];
-unsigned char hdmi_cec_func_config;
 cec_global_info_t cec_global_info;
-int cec_power_flag = 0;
+unsigned char cec_power_flag = 0;
+unsigned char cec_tx_flag = 0;
+unsigned char cec_rx_flag = 0;
 EXPORT_SYMBOL(cec_power_flag);
-
+unsigned char rc_long_press_pwr_key = 0;
+EXPORT_SYMBOL(rc_long_press_pwr_key);
+static int cec_msg_dbg_en = 0; 
 
 struct switch_dev lang_dev = {	// android ics switch device
 	.name = "lang_config",
@@ -99,7 +103,6 @@ static unsigned int tx_msg_cnt = 0;
 
 static struct list_head cec_tx_msg_phead = LIST_HEAD_INIT(cec_tx_msg_phead);
 
-static tv_cec_pending_e cec_pending_flag = TV_CEC_PENDING_OFF;
 //static tv_cec_polling_state_e cec_polling_state = TV_CEC_POLLING_OFF;
 
 unsigned int menu_lang_array[] = {(((unsigned int)'c')<<16)|(((unsigned int)'h')<<8)|((unsigned int)'i'),
@@ -115,14 +118,14 @@ static unsigned char * default_osd_name[16] = {
     "recording 1",
     "recording 2",
     "tuner 1",
-    "PHILIPS HMP1",
+    "AMLOGIC MBX1",
     "audio system",
     "tuner 2",
     "tuner 3",
-    "PHILIPS HMP2",
+    "AMLOGIC MBX2",
     "recording 3",
     "tunre 4",
-    "PHILIPS HMP3",
+    "AMLOGIC MBX3",
     "reserved 1",
     "reserved 2",
     "free use",
@@ -131,9 +134,8 @@ static unsigned char * default_osd_name[16] = {
 
 cec_rx_msg_buf_t cec_rx_msg_buf;
 
-// static unsigned char * osd_name_uninit = "\0\0\0\0\0\0\0\0";
 static irqreturn_t cec_isr_handler(int irq, void *dev_instance);
-
+static void cec_gpi_init(void);
 
 //static unsigned char dev = 0;
 static unsigned char cec_init_flag = 0;
@@ -222,6 +224,31 @@ void cec_test_function(unsigned char* arg, unsigned char arg_cnt)
 //    }
 }
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+#include <linux/earlysuspend.h>
+static struct early_suspend hdmitx_cec_early_suspend_handler;
+static void hdmitx_cec_early_suspend(struct early_suspend *h)
+{
+//    hdmitx_dev_t * phdmi = (hdmitx_dev_t *)h->param;
+    //cec_node_uninit((hdmitx_dev_t *)h->param);
+    if(rc_long_press_pwr_key == 1) {
+        cec_set_standby();
+        printk(KERN_INFO "CEC: get power-off command from Romote Control\n");
+        rc_long_press_pwr_key = 0;
+    }
+}
+
+static void hdmitx_cec_late_resume(struct early_suspend *h)
+{
+//    hdmitx_dev_t * phdmi = (hdmitx_dev_t *)h->param;
+    //cec_node_init((hdmitx_dev_t *)h->param);
+    if(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)) {
+		cec_imageview_on_smp();
+	}
+    printk(KERN_INFO "HDMITX CEC: late resume\n");
+}
+
+#endif
 
 /***************************** cec low level code *****************************/
 /*
@@ -250,256 +277,41 @@ static unsigned int cec_get_ms_tick_interval(unsigned int last_tick)
 }
 */
 
-int cec_ll_tx_irq(unsigned char *msg, unsigned char len)
-{
-    int i;
-    int ret = 0;
-    //unsigned long tx_flags;
-    unsigned int n = 0;
-    unsigned int repeat = 2;
-    // unsigned long timeout =jiffies + (HZ);
-    
-//    spin_lock_irqsave(&cec_tx_lock, cec_tx_flags);
-    do {
-        printk("\nCEC repeat:%x\n", repeat);
-        printk("\nCEC CEC_TX_MSG_STATUS:%lx\n", hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS));
-        printk("\nCEC CEC_RX_MSG_STATUS:%lx\n", hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_STATUS));
-        if(hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) == TX_DONE)
-            break;
-	    while ((hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) != TX_IDLE) || (hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_STATUS) != RX_IDLE)){
-	        //msleep(10);
-	        mdelay(10);
-	        n++;
-	        if(n >= 100){
-	            printk("\nCEC START:TX TIMEOUT!\n");
-	            //cec_hw_reset();
-	            break;
-	        }
-	    } 
-	     for (i = 0; i < len; i++) {
-	         hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_0_HEADER + i, msg[i]);
-	         hdmitx_cec_dbg_print("CEC: tx msg[%d]:0x%x\n",i,msg[i]);
-	     }
-	     
-	     hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_LENGTH, len-1);
-	     hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_REQ_CURRENT);//TX_REQ_NEXT
-	  
-	//     hdmitx_cec_dbg_print("\n****************\n");
-	//     hdmitx_cec_dbg_print("CEC:CEC_TX_MSG_0_HEADER):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_0_HEADER));
-	//     hdmitx_cec_dbg_print("CEC:CEC_TX_MSG_1_OPCODE):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_1_OPCODE));
-	//     hdmitx_cec_dbg_print("CEC:CEC_TX_NUM_MSG):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_NUM_MSG));
-	//     hdmitx_cec_dbg_print("CEC:CEC_TX_MSG_LENGTH):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_LENGTH));
-	//     hdmitx_cec_dbg_print("CEC:CEC_TX_MSG_STATUS):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS));      
-	                        
-	//     printk("CEC: follow interrupt?\n");
-	//     if (stat_header == NULL) {        
-	//         while (hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) == TX_BUSY) {
-	//             msleep(50);
-	//             if(time_after(jiffies,timeout)){
-	//                 hdmirx_cec_dbg_print("CEC: tx time out!\n");                 
-	//                 break;
-	//             }    
-	//         }
-	//     } else if (*stat_header == 1) { // ping        
-	//         while (hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) == TX_BUSY) {
-	//             msleep(50);
-	//             if(time_after(jiffies,timeout)){
-	//                 hdmirx_cec_dbg_print("CEC: _tx time out!\n");                
-	//                 break;
-	//             }                 
-	//         }       
-	//         
-	//     }
-	    if(hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) != TX_DONE){
-	        while (hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) != TX_DONE){
-	            if(hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) == TX_ERROR){
-	                //msleep(10);
-	                ret = TX_ERROR;
-	                hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_ABORT);
-	                cec_hw_reset(); 
-	                repeat --;
-	                printk("\nCEC: TX_ERROR!\n"); 
-	                break;            
-	            }        
-	            //msleep(50);
-	            mdelay(50);
-	            n++;
-	            printk("CEC: TX transmit\n");
-	            if(n >= 20){
-	                ret = TX_BUSY;
-	                hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_ABORT);
-	                cec_hw_reset();
-	                repeat--;
-	                printk("\nCEC END: TX TIMEOUT!\n");
-	                break;
-	            }
-	        }
-	    }else{
-	        ret = TX_DONE;
-	        hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_NO_OP);
-	        break;
-	    }        
-     } while(repeat);              
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_CLEAR_BUF, 0x1);
-    {//Delay some time
-	    int i = 10;
-	    while(i--);
-    }
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_CLEAR_BUF, 0x0);
-    //spin_unlock_irqrestore(&cec_tx_lock,tx_flags);
-    //ret = hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS);
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_NO_OP);
-    
-    return ret;
-}
-
-int cec_ll_tx(unsigned char *msg, unsigned char len, unsigned char *stat_header)
-{
-    int i;
-    int ret = 0;
-    //unsigned long tx_flags;
-    unsigned int n = 0;
-    unsigned int repeat = 2;
-    // unsigned long timeout =jiffies + (HZ);
-    
-//    spin_lock_irqsave(&cec_tx_lock, cec_tx_flags);
-    do {
-        //printk("\nCEC repeat:%x\n", repeat);
-        //printk("\nCEC CEC_TX_MSG_STATUS:%x\n", hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS));
-        //printk("\nCEC CEC_RX_MSG_STATUS:%x\n", hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_STATUS));
-        if(hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) == TX_DONE)
-            break;
-	    while ((hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) != TX_IDLE) || (hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_STATUS) != RX_IDLE)){
-	        msleep(10);
-	        n++;
-	        if(n >= 100){
-	            printk("\nCEC START:TX TIMEOUT!\n");
-	            //cec_hw_reset();
-	            break;
-	        }
-	    } 
-	     for (i = 0; i < len; i++) {
-	         hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_0_HEADER + i, msg[i]);
-	         hdmitx_cec_dbg_print("CEC: tx msg[%d]:0x%x\n",i,msg[i]);
-	     }
-	     
-	     hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_LENGTH, len-1);
-	     hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_REQ_CURRENT);//TX_REQ_NEXT
-	  
-	//     hdmitx_cec_dbg_print("\n****************\n");
-	//     hdmitx_cec_dbg_print("CEC:CEC_TX_MSG_0_HEADER):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_0_HEADER));
-	//     hdmitx_cec_dbg_print("CEC:CEC_TX_MSG_1_OPCODE):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_1_OPCODE));
-	//     hdmitx_cec_dbg_print("CEC:CEC_TX_NUM_MSG):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_NUM_MSG));
-	//     hdmitx_cec_dbg_print("CEC:CEC_TX_MSG_LENGTH):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_LENGTH));
-	//     hdmitx_cec_dbg_print("CEC:CEC_TX_MSG_STATUS):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS));      
-	                        
-	//     printk("CEC: follow interrupt?\n");
-	//     if (stat_header == NULL) {        
-	//         while (hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) == TX_BUSY) {
-	//             msleep(50);
-	//             if(time_after(jiffies,timeout)){
-	//                 hdmirx_cec_dbg_print("CEC: tx time out!\n");                 
-	//                 break;
-	//             }    
-	//         }
-	//     } else if (*stat_header == 1) { // ping        
-	//         while (hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) == TX_BUSY) {
-	//             msleep(50);
-	//             if(time_after(jiffies,timeout)){
-	//                 hdmirx_cec_dbg_print("CEC: _tx time out!\n");                
-	//                 break;
-	//             }                 
-	//         }       
-	//         
-	//     }
-	    if(hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) != TX_DONE){
-	        while (hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) != TX_DONE){
-	            if(hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS) == TX_ERROR){
-	                //msleep(10);
-	                ret = TX_ERROR;
-	                hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_ABORT);
-	                cec_hw_reset(); 
-	                repeat --;
-	                printk("\nCEC: TX_ERROR!\n"); 
-	                break;            
-	            }        
-	            msleep(50);
-	            n++;
-	            printk("CEC: TX transmit\n");
-	            if(n >= 20){
-	                ret = TX_BUSY;
-	                hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_ABORT);
-	                cec_hw_reset();
-	                repeat--;
-	                printk("\nCEC END: TX TIMEOUT!\n");
-	                break;
-	            }
-	        }
-	    }else{
-	        ret = TX_DONE;
-	        hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_NO_OP);
-	        break;
-	    }        
-     } while(repeat);              
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_CLEAR_BUF, 0x1);
-    {//Delay some time
-	    int i = 10;
-	    while(i--);
-    }
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_CLEAR_BUF, 0x0);
-    //spin_unlock_irqrestore(&cec_tx_lock,tx_flags);
-    //ret = hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS);
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_NO_OP);
-    
-    return ret;
-}
-
 int cec_ll_rx( unsigned char *msg, unsigned char *len)
 {
-
     unsigned char i;
     unsigned char rx_status;
     unsigned char data;
+    unsigned char msg_log_buf[128];
+    int pos;
+    unsigned char n;
+    unsigned char *msg_start = msg;
     
     int rx_msg_length = hdmi_rd_reg(CEC0_BASE_ADDR + CEC_RX_MSG_LENGTH) + 1;
-       
-//    spin_lock(&cec_rx_lock);
-//    hdmitx_cec_dbg_print("\n**************************************\n");
-//    hdmitx_cec_dbg_print("CEC:CEC_RX_MSG_0_HEADER):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_0_HEADER));
-//    hdmitx_cec_dbg_print("CEC:CEC_RX_MSG_1_OPCODE):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_1_OPCODE));
-//    hdmitx_cec_dbg_print("CEC:CEC_RX_NUM_MSG):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_NUM_MSG));
-//    hdmitx_cec_dbg_print("CEC:CEC_RX_MSG_STATUS):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_STATUS));
+
     hdmi_wr_reg(CEC0_BASE_ADDR + CEC_RX_MSG_CMD,  RX_ACK_CURRENT);
-//    hdmitx_cec_dbg_print("\n****************\n");
-    
-    for (i = 0; i < rx_msg_length; i++) {
+
+    for (i = 0; i < rx_msg_length && i < MAX_MSG; i++) {
         data = hdmi_rd_reg(CEC0_BASE_ADDR + CEC_RX_MSG_0_HEADER +i);
         *msg = data;
         msg++;
-        hdmitx_cec_dbg_print("CEC:rx data[%d]:0x%x\n",i,data);
     }
     *len = rx_msg_length;
     rx_status = hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_STATUS);
 
-    hdmi_wr_reg(CEC0_BASE_ADDR + CEC_RX_MSG_CMD, RX_DISABLE);
+    //hdmi_wr_reg(CEC0_BASE_ADDR + CEC_RX_MSG_CMD, RX_DISABLE);
 
     hdmi_wr_reg(CEC0_BASE_ADDR + CEC_RX_MSG_CMD,  RX_NO_OP);
-          
-//    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_RX_CLEAR_BUF, 0x1);
-//    {//Delay some time
-//	    int i = 10;
-//	    while(i--);
-//    }
-//    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_RX_CLEAR_BUF, 0x0);  
-//    hdmitx_cec_dbg_print("\n****************\n");
-//    hdmitx_cec_dbg_print("CEC:CEC_RX_MSG_0_HEADER):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_0_HEADER));
-//    hdmitx_cec_dbg_print("CEC:CEC_RX_MSG_1_OPCODE):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_1_OPCODE));
-//    hdmitx_cec_dbg_print("CEC:CEC_RX_NUM_MSG):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_NUM_MSG));
-//    hdmitx_cec_dbg_print("CEC:CEC_RX_MSG_STATUS):0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_STATUS));  
-
-//    hdmitx_cec_dbg_print("\n**************************************\n");  
-//    spin_unlock(&cec_rx_lock);
-
+    if(cec_msg_dbg_en == 1){
+        pos = 0;
+        pos += sprintf(msg_log_buf + pos, "CEC: rx msg len: %d   dat: ", rx_msg_length);
+        for(n = 0; n < rx_msg_length; n++) {
+            pos += sprintf(msg_log_buf + pos, "%02x ", msg_start[n]);
+        }
+        pos += sprintf(msg_log_buf + pos, "\n");
+        msg_log_buf[pos] = '\0';
+        printk("%s", msg_log_buf);
+    }
     return rx_status;
 }
 
@@ -514,8 +326,6 @@ void cec_isr_post_process(void)
             cec_rx_msg_buf.rx_read_pos++;
         }
     }
-
-    //printk("[TV CEC RX]: rx_read_pos %x, rx_write_pos %x\n", cec_rx_msg_buf.rx_read_pos, cec_rx_msg_buf.rx_write_pos);
 }
 
 void cec_usr_cmd_post_process(void)
@@ -525,51 +335,72 @@ void cec_usr_cmd_post_process(void)
     //spin_lock_irqsave(&p_tx_list_lock, cec_tx_list_flags);
 
     list_for_each_entry_safe(p, ptmp, &cec_tx_msg_phead, list) {
-        cec_ll_tx(p->msg, p->length, NULL);
+        cec_ll_tx(p->msg, p->length);
         unregister_cec_tx_msg(p);
     }
-
-    //spin_unlock_irqrestore(&p_tx_list_lock, cec_tx_list_flags);
-
-    //printk("[TV CEC TX]: tx_msg_cnt = %x\n", tx_msg_cnt);
 }
 
-////void cec_timer_post_process(void)
-////{
-////    /* timer post process*/
-////    if (cec_polling_state == TV_CEC_POLLING_ON) {
-////        cec_tv_polling_online_dev();
-////        cec_polling_state = TV_CEC_POLLING_OFF;
-////    }
-////}
+static int detect_tv_support_cec(unsigned addr)
+{
+    unsigned int ret = 0;
+    unsigned char msg[1];
+    msg[0] = (addr<<4) | 0x0;       // 0x0, TV's root address
+    ret = cec_ll_tx(msg, 1);
+    printk("CEC: tv%shave CEC feature\n", ret ? " " : " don\'t");
+    return (hdmitx_device->tv_cec_support = ret);
+}
+
 void cec_node_init(hdmitx_dev_t* hdmitx_device)
 {
 	int i, bool = 0;
-	//unsigned long cec_init_flags;
-	
-	enum _cec_log_dev_addr_e player_dev[3] = {   CEC_PLAYBACK_DEVICE_1_ADDR,
+	unsigned timeout = 2;
+	const enum _cec_log_dev_addr_e player_dev[3] = {   CEC_PLAYBACK_DEVICE_1_ADDR,
 	    										 CEC_PLAYBACK_DEVICE_2_ADDR,
 	    										 CEC_PLAYBACK_DEVICE_3_ADDR,
 	    									  };
-    if(!((hdmi_cec_func_config>>CEC_FUNC_MSAK) & 0x1))
+
+	//unsigned long cec_init_flags;
+	cec_tx_flag = 1;
+	cec_rx_flag = 1;
+	cec_power_flag = 1;
+    if((hdmitx_device->cec_init_ready == 0) || (hdmitx_device->hpd_state == 0)) {      // If no connect, return directly
+        printk("CEC not ready\n");
+        return;
+    }
+    else {
+        printk("CEC node init\n");
+    }
+
+    if(!(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)))
         return ;
-    printk("CEC node init\n");    
     // If VSDB is not valid, wait
-    while(hdmitx_device->hdmi_info.vsdb_phy_addr.valid == 0)
+    while((hdmitx_device->hdmi_info.vsdb_phy_addr.valid == 0) && (timeout--)) {
         msleep(100);
-        
+    }
+#if 0
+    //Init GPIOx_27 IN for HDMI CEC arbitration
+    //Disable I2C_SDA_B:reg5[31]
+    //Disable I2C_SDA_SLAVE:reg5[29]
+    //Enable GPIOx_27 IN:0x2018[27]
+    //GPIOx_27 IN:0x201a[27]
+    aml_write_reg32(P_PERIPHS_PIN_MUX_5, aml_read_reg32(P_PERIPHS_PIN_MUX_5) & (~(1 << 31)));
+    aml_write_reg32(P_PERIPHS_PIN_MUX_5, aml_read_reg32(P_PERIPHS_PIN_MUX_5) & (~(1 << 29))); 
+    aml_write_reg32(P_PREG_PAD_GPIO4_EN_N, aml_read_reg32(P_PREG_PAD_GPIO4_EN_N) | (1 << 27));
+#endif
     // Clear CEC Int. state and set CEC Int. mask
     WRITE_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_STAT_CLR, READ_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_STAT_CLR) | (1 << 23));    // Clear the interrupt
     WRITE_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_MASK, READ_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_MASK) | (1 << 23));            // Enable the hdmi cec interrupt
 
     
 	for(i = 0; i < 3; i++){ 
-//	    printk("CEC: start poll dev\n");  	
+	    //hdmitx_cec_dbg_print("CEC: start poll dev\n");  	
 		cec_polling_online_dev(player_dev[i], &bool);
-//		printk("CEC: end poll dev\n");
+		hdmitx_cec_dbg_print("CEC: player_dev[%d]:0x%x\n", i, player_dev[i]);
+		//hdmitx_cec_dbg_print("CEC: end poll dev\n");
 		if(bool == 0){  // 0 means that no any respond
-            //cec_global_info.cec_node_info[player_dev[i]].power_status = TRANS_STANDBY_TO_ON;			
+		    cec_global_info.cec_node_info[cec_global_info.my_node_index].power_status = TRANS_STANDBY_TO_ON;	
             cec_global_info.my_node_index = player_dev[i];
+            aml_write_reg32(P_AO_DEBUG_REG3, aml_read_reg32(P_AO_DEBUG_REG3) | (cec_global_info.my_node_index & 0xf));
             cec_global_info.cec_node_info[player_dev[i]].log_addr = player_dev[i];
             // Set Physical address
             cec_global_info.cec_node_info[player_dev[i]].phy_addr.phy_addr_4 = ( ((hdmitx_device->hdmi_info.vsdb_phy_addr.a)<<12)
@@ -586,58 +417,68 @@ void cec_node_init(hdmitx_dev_t* hdmitx_device)
             cec_global_info.cec_node_info[player_dev[i]].dev_type = cec_log_addr_to_dev_type(player_dev[i]);
             cec_global_info.cec_node_info[player_dev[i]].dev_type = cec_log_addr_to_dev_type(player_dev[i]);
             strcpy(cec_global_info.cec_node_info[player_dev[i]].osd_name, default_osd_name[player_dev[i]]); //Max num: 14Bytes
-            //printk("CEC: Set logical address: %d\n", hdmi_rd_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0));
+            //hdmitx_cec_dbg_print("CEC: Set logical address: %d\n", hdmi_rd_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0));
             hdmi_wr_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0, (0x1 << 4) | player_dev[i]);
 		    
-     		printk("CEC: Set logical address: %d\n", player_dev[i]);
+     		hdmitx_cec_dbg_print("CEC: Set logical address: %d\n", player_dev[i]);
             
             //cec_hw_reset();
             //spin_lock_irqsave(&cec_init_lock,cec_init_flags);
-            printk("aml_read_reg32(P_AO_DEBUG_REG0):0x%x\n" ,aml_read_reg32(P_AO_DEBUG_REG0));
-            //if((aml_read_reg32(P_AO_DEBUG_REG0) >> 4) & 0x1) {
-		        cec_imageview_on_smp();
-    		    cec_active_source_smp();
-    		//}
+            hdmitx_cec_dbg_print("aml_read_reg32(P_AO_DEBUG_REG0):0x%x\n" ,aml_read_reg32(P_AO_DEBUG_REG0));
+
+	        cec_imageview_on_smp();
+
+            // here, we need to detect whether TV is supporting the CEC function
+            // if not, jump out to save system time
+            if(!detect_tv_support_cec(player_dev[i])) 
+                break;
+
+	        msleep(200);
+	        cec_imageview_on_smp();
+		    cec_active_source_smp();
 		    //cec_usrcmd_set_report_physical_address();
 		    cec_report_physical_address_smp();
 		    
 		    cec_get_menu_language_smp();
 		    
-		    //cec_device_vendor_id_smp();
+		    cec_device_vendor_id_smp();
 		    
 		    //cec_usrcmd_set_imageview_on( CEC_TV_ADDR );   // Wakeup TV
 
 		    //msleep(200);
 		    //cec_usrcmd_set_imageview_on( CEC_TV_ADDR );   // Wakeup TV again
 		    //msleep(200);
-     		//printk("CEC: Set physical address: %x\n", cec_global_info.cec_node_info[player_dev[i]].phy_addr.phy_addr_4);
+     		//hdmitx_cec_dbg_print("CEC: Set physical address: %x\n", cec_global_info.cec_node_info[player_dev[i]].phy_addr.phy_addr_4);
      		
     		//cec_usrcmd_set_active_source(); 
 
     		//spin_unlock_irqrestore(&cec_init_lock,cec_init_flags);
     		//cec_active_source(&(cec_rx_msg_buf.cec_rx_message[cec_rx_msg_buf.rx_read_pos]));    
    		
-    		cec_menu_status_smp();
-
-     		  		
+    		cec_menu_status_smp(DEVICE_MENU_ACTIVE);
+	
+			cec_global_info.cec_node_info[cec_global_info.my_node_index].menu_status = DEVICE_MENU_ACTIVE;
 			cec_global_info.cec_node_info[cec_global_info.my_node_index].power_status = POWER_ON;
-			cec_power_flag = 1;
     		break;
-    		
 		}
 	}	
 	if(bool == 1)
-		printk("CEC: Can't get a valid logical address\n");
+		hdmitx_cec_dbg_print("CEC: Can't get a valid logical address\n");
 }
 
 void cec_node_uninit(hdmitx_dev_t* hdmitx_device)
 {
-    if(!((hdmi_cec_func_config>>CEC_FUNC_MSAK) & 0x1))        
+    if(!(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)))
        return ;
+    cec_global_info.cec_node_info[cec_global_info.my_node_index].power_status = TRANS_ON_TO_STANDBY;
     cec_power_flag = 0;
-    printk("CEC: cec node uninit!\n");
+    cec_tx_flag = 0;
+    cec_rx_flag = 0;
+    hdmitx_cec_dbg_print("CEC: cec node uninit!\n");
+    //cec_menu_status_smp(DEVICE_MENU_INACTIVE);
     WRITE_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_MASK, READ_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_MASK) & ~(1 << 23));            // Disable the hdmi cec interrupt
     //free_irq(INT_HDMI_CEC, (void *)hdmitx_device);
+    cec_global_info.cec_node_info[cec_global_info.my_node_index].power_status = POWER_STANDBY;
 }
 
 static int cec_task(void *data)
@@ -645,31 +486,31 @@ static int cec_task(void *data)
 	extern void dump_hdmi_cec_reg(void);
     hdmitx_dev_t* hdmitx_device = (hdmitx_dev_t*) data;
 
-//    printk("CEC: Physical Address [A]: %x\n",hdmitx_device->hdmi_info.vsdb_phy_addr.a);
-//    printk("CEC: Physical Address [B]: %x\n",hdmitx_device->hdmi_info.vsdb_phy_addr.b);
-//    printk("CEC: Physical Address [C]: %x\n",hdmitx_device->hdmi_info.vsdb_phy_addr.c);
-//    printk("CEC: Physical Address [D]: %x\n",hdmitx_device->hdmi_info.vsdb_phy_addr.d);
+//    hdmitx_cec_dbg_print("CEC: Physical Address [A]: %x\n",hdmitx_device->hdmi_info.vsdb_phy_addr.a);
+//    hdmitx_cec_dbg_print("CEC: Physical Address [B]: %x\n",hdmitx_device->hdmi_info.vsdb_phy_addr.b);
+//    hdmitx_cec_dbg_print("CEC: Physical Address [C]: %x\n",hdmitx_device->hdmi_info.vsdb_phy_addr.c);
+//    hdmitx_cec_dbg_print("CEC: Physical Address [D]: %x\n",hdmitx_device->hdmi_info.vsdb_phy_addr.d);
 
     cec_init_flag = 1;
-    
-    cec_node_init(hdmitx_device);
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+    hdmitx_cec_early_suspend_handler.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN - 20;
+    hdmitx_cec_early_suspend_handler.suspend = hdmitx_cec_early_suspend;
+    hdmitx_cec_early_suspend_handler.resume = hdmitx_cec_late_resume;
+    hdmitx_cec_early_suspend_handler.param = hdmitx_device;
+
+    register_early_suspend(&hdmitx_cec_early_suspend_handler);
+#endif
+
+    //cec_node_init(hdmitx_device);
     
 //    dump_hdmi_cec_reg();
     
     // Get logical address
 
-    printk("CEC: CEC task process\n");
+    hdmitx_cec_dbg_print("CEC: CEC task process\n");
 
     while (1) {
-        //if((hdmi_cec_func_config>>CEC_FUNC_MSAK) & 0x1)
-        //{
-        //   cec_node_init(hdmitx_device);          
-        //}
-        //else
-        //{
-        //   cec_node_uninit(hdmitx_device);            
-        //}
-            
         if(down_interruptible(&tv_cec_sema))
            continue; 
                 
@@ -741,8 +582,8 @@ void cec_input_handle_message(void)
     //msg_length  = cec_rx_msg_buf.cec_rx_message[cec_rx_msg_buf.rx_write_pos].msg_length;
 
     /* process messages from tv polling and cec devices */
-    printk("----OP code----: %x\n", opcode);
-    if(((hdmi_cec_func_config>>CEC_FUNC_MSAK) & 0x1) && cec_power_flag)
+    hdmitx_cec_dbg_print("----OP code----: %x\n", opcode);
+    if((hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)) && cec_power_flag)
     {
         switch (opcode) {
         /*case CEC_OC_ACTIVE_SOURCE:
@@ -797,7 +638,7 @@ void cec_input_handle_message(void)
             cec_give_osd_name(pcec_message);
             break;
         case CEC_OC_STANDBY:
-              printk("----cec_standby-----");
+              hdmitx_cec_dbg_print("----cec_standby-----");
             cec_standby(pcec_message);
             break;
         case CEC_OC_SET_STREAM_PATH:
@@ -809,11 +650,13 @@ void cec_input_handle_message(void)
         case CEC_OC_GIVE_DEVICE_POWER_STATUS:
             cec_give_device_power_status(pcec_message);
             break;
-            */
          case CEC_OC_STANDBY:
+            if(POWER_ON != cec_global_info.cec_node_info[cec_global_info.my_node_index].power_status)
+                break;
          	cec_inactive_source(); 	  
             cec_standby_irq();
             break;       
+            */
         case CEC_OC_USER_CONTROL_PRESSED:
             cec_user_control_pressed_irq();
             break;
@@ -861,7 +704,7 @@ void cec_input_handle_message(void)
         case CEC_OC_GET_MENU_LANGUAGE:
         case CEC_OC_GIVE_AUDIO_STATUS:
         case CEC_OC_ABORT_MESSAGE:
-            printk("CEC: not support cmd: %x\n", opcode);
+            hdmitx_cec_dbg_print("CEC: not support cmd: %x\n", opcode);
             break;
         default:
             break;
@@ -883,7 +726,39 @@ void unregister_cec_tx_msg(cec_tx_message_list_t* cec_tx_message_list)
 
 void cec_hw_reset(void)
 {
-    unsigned char index = cec_global_info.my_node_index;
+#ifdef CONFIG_ARCH_MESON6
+    aml_write_reg32(APB_REG_ADDR(HDMI_CNTL_PORT), aml_read_reg32(APB_REG_ADDR(HDMI_CNTL_PORT))|(1<<16));
+#else 
+    WRITE_APB_REG(HDMI_CNTL_PORT, READ_APB_REG(HDMI_CNTL_PORT)|(1<<16));
+
+#endif
+    hdmi_wr_reg(OTHER_BASE_ADDR+HDMI_OTHER_CTRL0, 0xc); //[3]cec_creg_sw_rst [2]cec_sys_sw_rst
+    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_CLEAR_BUF, 0x1);
+    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_RX_CLEAR_BUF, 0x1);
+    
+    //mdelay(10);
+    {//Delay some time
+    	int i = 10;
+    	while(i--);
+    }
+    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_CLEAR_BUF, 0x0);
+    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_RX_CLEAR_BUF, 0x0);
+    hdmi_wr_reg(OTHER_BASE_ADDR+HDMI_OTHER_CTRL0, 0x0);
+//    WRITE_APB_REG(HDMI_CNTL_PORT, READ_APB_REG(HDMI_CNTL_PORT)&(~(1<<16)));
+#ifdef CONFIG_ARCH_MESON6
+    aml_write_reg32(APB_REG_ADDR(HDMI_CNTL_PORT), aml_read_reg32(APB_REG_ADDR(HDMI_CNTL_PORT))&(~(1<<16)));
+#else
+    WRITE_APB_REG(HDMI_CNTL_PORT, READ_APB_REG(HDMI_CNTL_PORT)&(~(1<<16)));
+#endif
+    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_CLOCK_DIV_H, 0x00 );
+    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_CLOCK_DIV_L, 0xf0 );
+
+    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0, (0x1 << 4) | cec_global_info.my_node_index);
+}
+
+void cec_hw_off(void)
+{
+    cec_tx_flag = 0;
 #ifdef CONFIG_ARCH_MESON6
     aml_write_reg32(APB_REG_ADDR(HDMI_CNTL_PORT), aml_read_reg32(APB_REG_ADDR(HDMI_CNTL_PORT))|(1<<16));
 #else 
@@ -908,10 +783,9 @@ void cec_hw_reset(void)
     WRITE_APB_REG(HDMI_CNTL_PORT, READ_APB_REG(HDMI_CNTL_PORT)&(~(1<<16)));
 #endif
     hdmi_wr_reg(CEC0_BASE_ADDR+CEC_CLOCK_DIV_H, 0x00 );
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_CLOCK_DIV_L, 0xf0 );
+    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_CLOCK_DIV_L, 0x00 );
 
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0, (0x1 << 4) | cec_global_info.cec_node_info[index].log_addr);
-    printk("CEC_LOGICAL_ADDR0:0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0));
+    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0, 0x00);
 }
 
 unsigned char check_cec_msg_valid(const cec_rx_message_t* pcec_message)
@@ -1051,36 +925,30 @@ static char *rx_status[] = {
 static irqreturn_t cec_isr_handler(int irq, void *dev_instance)
 {
     unsigned int data_msg_num, data_msg_stat;
-    unsigned int n;
 
-    if (cec_pending_flag == TV_CEC_PENDING_ON) {
-        // Clear the interrupt
-        WRITE_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_STAT_CLR, READ_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_STAT_CLR) & ~(1 << 23));
-        return IRQ_NONE;
-    }
     data_msg_stat = hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_STATUS);
-    if (data_msg_stat) {
+    if (data_msg_stat && cec_rx_flag) {
 //        hdmirx_cec_dbg_print("CEC Irq Rx Status: %s\n", rx_status[data_msg_stat&3]);
         if ((data_msg_stat & 0x3) == RX_DONE) {
+            unsigned char rx_msg[MAX_MSG], rx_len;
             data_msg_num = hdmi_rd_reg(CEC0_BASE_ADDR + CEC_RX_NUM_MSG);
-            if (0x0 == data_msg_num){
-                cec_hw_reset();
-                //hdmi_wr_reg(CEC0_BASE_ADDR + CEC_RX_MSG_CMD,  RX_ACK_NEXT);
-                printk("CEC: RX ERROR:data_msg_num=0,reset!\n");
-            }
-            for (n = 0; n < data_msg_num; n++) {                
-                unsigned char rx_msg[MAX_MSG], rx_len;
+            //if (0x0 == data_msg_num){
+            //    cec_hw_reset();
+            //    hdmi_wr_reg(CEC0_BASE_ADDR + CEC_RX_MSG_CMD,  RX_ACK_NEXT);
+            //    hdmitx_cec_dbg_print("CEC: RX ERROR:data_msg_num=0,reset!\n");
+            //}
+            //for (n = 0; n < data_msg_num; n++) {                
                 cec_ll_rx(rx_msg, &rx_len);
                 register_cec_rx_msg(rx_msg, rx_len);                
                 //hdmi_wr_reg(CEC0_BASE_ADDR + CEC_RX_CLEAR_BUF,  0x01);
                 //hdmi_wr_reg(CEC0_BASE_ADDR + CEC_RX_CLEAR_BUF,  0x0);
-            }
+            //}
         } else {
             //hdmi_wr_reg(CEC0_BASE_ADDR + CEC_RX_CLEAR_BUF,  0x01);
             //hdmi_wr_reg(CEC0_BASE_ADDR + CEC_RX_CLEAR_BUF,  0x0);
             hdmi_wr_reg(CEC0_BASE_ADDR + CEC_RX_MSG_CMD,  RX_NO_OP);                
             cec_hw_reset();
-            printk("CEC: recevie error[%s]\n", rx_status[data_msg_stat&3]);
+            hdmitx_cec_dbg_print("CEC: recevie error[%s]\n", rx_status[data_msg_stat&3]);
         }
     }
     //tasklet_schedule(&tasklet_cec);  
@@ -1141,36 +1009,30 @@ unsigned short cec_log_addr_to_dev_type(unsigned char log_addr)
 void cec_polling_online_dev(int log_addr, int *bool)
 {
     //int log_addr = 0;
-    int r;
+    unsigned long r;
     unsigned short dev_mask_tmp = 0;
     unsigned char msg[1];
-    unsigned char ping = 1;
-    unsigned int n =0;
 
     //for (log_addr = 1; log_addr < CEC_UNREGISTERED_ADDR; log_addr++) {
+        hdmitx_cec_dbg_print("aml_read_reg32(P_AO_DEBUG_REG3):0x%x\n",aml_read_reg32(P_AO_DEBUG_REG3));
+        //if(aml_read_reg32(P_AO_DEBUG_REG3) & 0xf){
+        //    *bool = 0;
+        //    cec_global_info.my_node_index = aml_read_reg32(P_AO_DEBUG_REG3) & 0xf;
+        //    return;
+        //}
+        cec_global_info.my_node_index = log_addr;
         msg[0] = (log_addr<<4) | log_addr;
-        hdmi_wr_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0, (0x1 << 4) | log_addr);     
-        r = cec_ll_tx(msg, 1, &ping);
-        //r = TX_DONE;
-        hdmitx_cec_dbg_print("\n --cec_polling--r:%d\n",r);
-
-        while (r == TX_BUSY)
-        {
-            msleep(10);
-            n++;
-            if(n >= 100){
-            	  printk("\nCEC POLLING TIMEOUT!\n");
-                break;
-            }
-        }
+        hdmi_wr_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0, (0x1 << 4) | 0xf);
+        hdmitx_cec_dbg_print("CEC_LOGICAL_ADDR0:0x%lx\n",hdmi_rd_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0));
+        r = cec_ll_tx(msg, 1);
             
-        if (r == TX_DONE) {
+        if (r == 0) {
             //dev_mask_tmp |= 1 << log_addr;
             //cec_global_info.cec_node_info[log_addr].log_addr = log_addr;
             //cec_global_info.cec_node_info[log_addr].dev_type = cec_log_addr_to_dev_type(log_addr);
             //cec_global_info.cec_node_info[log_addr].dev_type = CEC_PLAYBACK_DEVICE_TYPE;
 //            cec_find_hdmi_port(log_addr);
-            *bool = 1;
+            *bool = 0;
             //cec_hw_reset();
             //msleep(200);
         }else{
@@ -1179,40 +1041,23 @@ void cec_polling_online_dev(int log_addr, int *bool)
             //cec_global_info.cec_node_info[log_addr].log_addr = log_addr;
             //cec_global_info.cec_node_info[log_addr].dev_type = cec_log_addr_to_dev_type(log_addr);            
             cec_global_info.cec_node_info[log_addr].dev_type = cec_log_addr_to_dev_type(log_addr);
-        	  *bool = 0;
+        	  *bool = 1;
         }
-    //if (r != TX_DONE) {
-    //    dev_mask_tmp &= ~(1 << log_addr);
-    //    memset(&(cec_global_info.cec_node_info[log_addr]), 0, sizeof(cec_node_info_t));
-    //    //cec_global_info.cec_node_info[log_addr].log_addr = log_addr;
-    //    //cec_global_info.cec_node_info[log_addr].dev_type = cec_log_addr_to_dev_type(log_addr);            
-    //    cec_global_info.cec_node_info[log_addr].dev_type = cec_log_addr_to_dev_type(log_addr);
-    //    *bool = 0;
-    //}
-    //if (r == TX_DONE) {
-    //    dev_mask_tmp |= 1 << log_addr;
-    //    cec_global_info.cec_node_info[log_addr].log_addr = log_addr;
-    //    cec_global_info.cec_node_info[log_addr].dev_type = cec_log_addr_to_dev_type(log_addr);
-    //    //cec_global_info.cec_node_info[log_addr].dev_type = CEC_PLAYBACK_DEVICE_TYPE;
-    //    //cec_find_hdmi_port(log_addr);
-    //    *bool = 1;
-    //    //cec_hw_reset();
-    //    msleep(200);
-    //}       
-    //}
-    printk("CEC: poll online logic device: 0x%x BOOL: %d\n", log_addr, *bool);
+    if(*bool == 0) {
+        hdmi_wr_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0, (0x1 << 4) | log_addr);
+    }
+    hdmitx_cec_dbg_print("CEC: poll online logic device: 0x%x BOOL: %d\n", log_addr, *bool);
 
     if (cec_global_info.dev_mask != dev_mask_tmp) {
         cec_global_info.dev_mask = dev_mask_tmp;
     }
-
-    //hdmirx_cec_dbg_print("cec log device exist: %x\n", dev_mask_tmp);
 }
 
 void cec_report_phy_addr(cec_rx_message_t* pcec_message)
 {
     //unsigned char index = cec_global_info.my_node_index;
     ////unsigned char log_addr = pcec_message->content.msg.header >> 4;
+
     //cec_global_info.dev_mask |= 1 << index;
     //cec_global_info.cec_node_info[index].dev_type = cec_log_addr_to_dev_type(index);
     //cec_global_info.cec_node_info[index].real_info_mask |= INFO_MASK_DEVICE_TYPE;
@@ -1230,14 +1075,13 @@ void cec_report_phy_addr(cec_rx_message_t* pcec_message)
 
 void cec_give_physical_address(cec_rx_message_t* pcec_message)
 {
-    unsigned char log_addr = pcec_message->content.msg.header >> 4;
     unsigned char index = cec_global_info.my_node_index;
     unsigned char phy_addr_ab = (aml_read_reg32(P_AO_DEBUG_REG1) >> 8) & 0xff;
     unsigned char phy_addr_cd = aml_read_reg32(P_AO_DEBUG_REG1) & 0xff;
     
     //if (cec_global_info.dev_mask & (1 << log_addr)) {
         unsigned char msg[5];
-        msg[0] = ((index & 0xf) << 4) | log_addr;
+        msg[0] = ((index & 0xf) << 4) | CEC_BROADCAST_ADDR;
         msg[1] = CEC_OC_REPORT_PHYSICAL_ADDRESS;
         msg[2] = phy_addr_ab;
         msg[3] = phy_addr_cd;
@@ -1245,7 +1089,7 @@ void cec_give_physical_address(cec_rx_message_t* pcec_message)
         //msg[2] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.ab;
         //msg[3] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.cd;
         //msg[4] = cec_global_info.cec_node_info[index].log_addr;
-        cec_ll_tx(msg, 5, NULL);
+        cec_ll_tx(msg, 5);
     //}
 //    hdmirx_cec_dbg_print("cec_report_phy_addr: %x\n", cec_global_info.cec_node_info[index].log_addr);
 }
@@ -1254,33 +1098,27 @@ void cec_give_physical_address(cec_rx_message_t* pcec_message)
 void cec_device_vendor_id(cec_rx_message_t* pcec_message)
 {
     unsigned char index = cec_global_info.my_node_index;
-    unsigned char msg[9];
+    unsigned char msg[5];
     
     msg[0] = ((index & 0xf) << 4) | CEC_BROADCAST_ADDR;
     msg[1] = CEC_OC_DEVICE_VENDOR_ID;
-    memcpy(&msg[2], "PHILIPS", strlen("PHILIPS"));
+    msg[2] = 0x00;//philips vid:00-02-6c(hex)
+    msg[3] = 0x02;
+    msg[4] = 0x6c;
     
-    cec_ll_tx(msg, 9, NULL);
+    cec_ll_tx(msg, 5);
 }
 
 ////////////////////////////////////////////////
 void cec_give_osd_name(cec_rx_message_t* pcec_message)
 {
-
-    unsigned char log_addr = pcec_message->content.msg.header >> 4;
     unsigned char index = cec_global_info.my_node_index;
 	unsigned char osd_len = strlen(cec_global_info.cec_node_info[index].osd_name);
-    //if (cec_global_info.dev_mask & (1 << log_addr)) {
-        unsigned char msg[16];
-        msg[0] = ((index & 0xf) << 4) | log_addr;
-        msg[1] = CEC_OC_SET_OSD_NAME;
-        memcpy(&msg[2], cec_global_info.cec_node_info[index].osd_name, osd_len);
-//        msg[2] = (cec_global_info.cec_node_info[index].vendor_id >> 16) & 0xff;
-//        msg[3] = (cec_global_info.cec_node_info[index].vendor_id >> 8) & 0xff;
-//        msg[4] = (cec_global_info.cec_node_info[index].vendor_id >> 0) & 0xff;
-        cec_ll_tx(msg, 2 + osd_len, NULL);
-    //}
-//    hdmirx_cec_dbg_print("%s: %x\n", cec_global_info.cec_node_info[index].log_addr);
+    unsigned char msg[16];
+    msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
+    msg[1] = CEC_OC_SET_OSD_NAME;
+    memcpy(&msg[2], cec_global_info.cec_node_info[index].osd_name, osd_len);
+    cec_ll_tx(msg, 2 + osd_len);
 }
 
 
@@ -1299,16 +1137,17 @@ void cec_feature_abort(cec_rx_message_t* pcec_message)
 {
     unsigned char index = cec_global_info.my_node_index;
     unsigned char opcode = pcec_message->content.msg.opcode;
-    
+    unsigned char src_log_addr = (pcec_message->content.msg.header >> 4 )&0xf;
+
     if(opcode != 0xf){
         unsigned char msg[4];
         
-        msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
+        msg[0] = ((index & 0xf) << 4) | src_log_addr;
         msg[1] = CEC_OC_FEATURE_ABORT;
         msg[2] = opcode;
         msg[3] = CEC_UNRECONIZED_OPCODE;
         
-        cec_ll_tx(msg, 4, NULL);        
+        cec_ll_tx(msg, 4);        
     }
     
     hdmirx_cec_dbg_print("cec_feature_abort: opcode %x\n", pcec_message->content.msg.opcode);
@@ -1342,7 +1181,7 @@ void cec_report_physical_address_smp(void)
     //msg[3] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.cd;
     msg[4] = cec_global_info.cec_node_info[index].dev_type;                        
     
-    cec_ll_tx(msg, 5, NULL);
+    cec_ll_tx(msg, 5);
         
 }
 
@@ -1352,13 +1191,12 @@ void cec_imageview_on_smp(void)
     unsigned char index = cec_global_info.my_node_index;
 
     //hdmitx_cec_dbg_print("\nCEC:function:%s,file:%s,line:%d\n",__FUNCTION__,__FILE__,__LINE__);   
-    printk("CEC:hdmi_cec_func_config:0x%x\n",hdmi_cec_func_config);  
-    if((hdmi_cec_func_config >> CEC_FUNC_MSAK) & 0x1){
-        if((hdmi_cec_func_config >> ONE_TOUCH_PLAY_MASK) & 0x1)
-        {
+    hdmitx_cec_dbg_print("cec_func_config:0x%x\n",hdmitx_device->cec_func_config);  
+    if(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)) {
+        if(hdmitx_device->cec_func_config & (1 << ONE_TOUCH_PLAY_MASK)) {
             msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
             msg[1] = CEC_OC_IMAGE_VIEW_ON;
-            cec_ll_tx(msg, 2, NULL);
+            cec_ll_tx(msg, 2);
         }
     }  
 }
@@ -1373,7 +1211,7 @@ void cec_get_menu_language_smp(void)
     msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
     msg[1] = CEC_OC_GET_MENU_LANGUAGE;
     
-    cec_ll_tx(msg, 2, NULL);
+    cec_ll_tx(msg, 2);
     
 }
 
@@ -1381,38 +1219,39 @@ void cec_menu_status(cec_rx_message_t* pcec_message)
 {
     unsigned char msg[3];
     unsigned char index = cec_global_info.my_node_index;
-    
-    //hdmitx_cec_dbg_print("\nCEC:function:%s,file:%s,line:%d\n",__FUNCTION__,__FILE__,__LINE__);    
-    
-    //if((2 == pcec_message->content.msg.operands[0]) || (0 == pcec_message->content.msg.operands[0]) ){    
-    //    msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
-    //    msg[1] = CEC_OC_MENU_STATUS;
-    //    msg[2] = DEVICE_MENU_ACTIVE;
-    //}else{
-        msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
-        msg[1] = CEC_OC_MENU_STATUS;
-        msg[2] = DEVICE_MENU_INACTIVE;        
-    //}
-    cec_ll_tx(msg, 3, NULL);
+    unsigned char src_log_addr = (pcec_message->content.msg.header >> 4 )&0xf;
+
+     if(0xf != src_log_addr) {
+            msg[0] = ((index & 0xf) << 4) | src_log_addr;
+            msg[1] = CEC_OC_MENU_STATUS;
+        if((2 == pcec_message->content.msg.operands[0])){    
+            msg[2] = cec_global_info.cec_node_info[index].menu_status;
+        }else if(0 == pcec_message->content.msg.operands[0]){
+            cec_global_info.cec_node_info[index].menu_status = DEVICE_MENU_INACTIVE;
+            msg[2] = DEVICE_MENU_INACTIVE;        
+        }else{
+            cec_global_info.cec_node_info[index].menu_status = DEVICE_MENU_ACTIVE;
+            msg[2] = DEVICE_MENU_ACTIVE; 
+        }
+        cec_ll_tx(msg, 3);
+    }
 }
 
-void cec_menu_status_smp(void)
+void cec_menu_status_smp(cec_device_menu_state_e status)
 {
     unsigned char msg[3];
     unsigned char index = cec_global_info.my_node_index;
-    
-    //hdmitx_cec_dbg_print("\nCEC:function:%s,file:%s,line:%d\n",__FUNCTION__,__FILE__,__LINE__);    
-    
-    //if((2 == pcec_message->content.msg.operands[0]) || (0 == pcec_message->content.msg.operands[0]) ){    
+
+    if(status == DEVICE_MENU_ACTIVE){    
         msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
         msg[1] = CEC_OC_MENU_STATUS;
         msg[2] = DEVICE_MENU_ACTIVE;
-    //}else{
-    //    msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
-    //    msg[1] = CEC_OC_MENU_STATUS;
-    //    msg[2] = DEVICE_MENU_INACTIVE;        
-    //}
-    cec_ll_tx(msg, 3, NULL);
+    }else{
+        msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
+        msg[1] = CEC_OC_MENU_STATUS;
+        msg[2] = DEVICE_MENU_INACTIVE;        
+    }
+    cec_ll_tx(msg, 3);
     
     //MSG_P1( index, CEC_TV_ADDR,
     //        CEC_OC_MENU_STATUS, 
@@ -1423,19 +1262,68 @@ void cec_menu_status_smp(void)
 
 }
 
-void cec_device_vendor_id_smp(void)
+void cec_menu_status_smp_irq(unsigned int status)
 {
     unsigned char msg[3];
+    unsigned char index = cec_global_info.my_node_index;
+
+    if(status == DEVICE_MENU_ACTIVE){    
+        msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
+        msg[1] = CEC_OC_MENU_STATUS;
+        msg[2] = DEVICE_MENU_ACTIVE;
+    }else{
+        msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
+        msg[1] = CEC_OC_MENU_STATUS;
+        msg[2] = DEVICE_MENU_INACTIVE;        
+    }
+    cec_ll_tx(msg, 3);
+    
+    //MSG_P1( index, CEC_TV_ADDR,
+    //        CEC_OC_MENU_STATUS, 
+    //        DEVICE_MENU_ACTIVE
+    //        );
+
+    //register_cec_tx_msg(gbl_msg, 3); 
+
+}
+EXPORT_SYMBOL(cec_menu_status_smp_irq);
+
+void cec_device_vendor_id_smp(void)
+{
+    unsigned char msg[5];
     unsigned char index = cec_global_info.my_node_index;
     
     //hdmitx_cec_dbg_print("\nCEC:function:%s,file:%s,line:%d\n",__FUNCTION__,__FILE__,__LINE__);    
 
     msg[0] = ((index & 0xf) << 4) | CEC_BROADCAST_ADDR;
     msg[1] = CEC_OC_DEVICE_VENDOR_ID;
-    msg[2] = cec_global_info.cec_node_info[index].vendor_id;
+    msg[2] = 0x00;//philips vid:00-02-6c(hex)
+    msg[3] = 0x02;
+    msg[4] = 0x6c;
 
-    cec_ll_tx(msg, 3, NULL);
+    cec_ll_tx(msg, 5);
 
+}
+
+void cec_active_source_irq(void)
+{
+    unsigned char msg[4];
+    unsigned char index = cec_global_info.my_node_index;
+    unsigned char phy_addr_ab = (aml_read_reg32(P_AO_DEBUG_REG1) >> 8) & 0xff;
+    unsigned char phy_addr_cd = aml_read_reg32(P_AO_DEBUG_REG1) & 0xff;      
+    //hdmitx_cec_dbg_print("\nCEC:function:%s,file:%s,line:%d\n",__FUNCTION__,__FILE__,__LINE__);    
+
+    if(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)) {
+        if(hdmitx_device->cec_func_config & (1 << ONE_TOUCH_PLAY_MASK)) {    
+            msg[0] = ((index & 0xf) << 4) | CEC_BROADCAST_ADDR;
+            msg[1] = CEC_OC_ACTIVE_SOURCE;
+            msg[2] = phy_addr_ab;
+            msg[3] = phy_addr_cd;
+            //msg[2] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.ab;
+            //msg[3] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.cd;
+            cec_ll_tx(msg, 4);
+        }
+    }
 }
 
 void cec_active_source_smp(void)
@@ -1446,16 +1334,15 @@ void cec_active_source_smp(void)
     unsigned char phy_addr_cd = aml_read_reg32(P_AO_DEBUG_REG1) & 0xff;      
     //hdmitx_cec_dbg_print("\nCEC:function:%s,file:%s,line:%d\n",__FUNCTION__,__FILE__,__LINE__);    
 
-    if((hdmi_cec_func_config >> CEC_FUNC_MSAK) & 0x1){    
-        if((hdmi_cec_func_config >> ONE_TOUCH_PLAY_MASK) & 0x1)
-        {    
+    if(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)) {
+        if(hdmitx_device->cec_func_config & (1 << ONE_TOUCH_PLAY_MASK)) {    
             msg[0] = ((index & 0xf) << 4) | CEC_BROADCAST_ADDR;
             msg[1] = CEC_OC_ACTIVE_SOURCE;
             msg[2] = phy_addr_ab;
             msg[3] = phy_addr_cd;
             //msg[2] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.ab;
             //msg[3] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.cd;
-            cec_ll_tx(msg, 4, NULL);
+            cec_ll_tx(msg, 4);
         }
     }
 }
@@ -1477,7 +1364,7 @@ void cec_active_source(cec_rx_message_t* pcec_message)
         msg[3] = phy_addr_cd;
         //msg[2] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.ab;
         //msg[3] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.cd;
-        cec_ll_tx(msg, 4, NULL);
+        cec_ll_tx(msg, 4);
         
 //        MSG_P2( index, CEC_TV_ADDR, 
 //                CEC_OC_ACTIVE_SOURCE, 
@@ -1496,21 +1383,22 @@ void cec_set_stream_path(cec_rx_message_t* pcec_message)
 //    unsigned char log_addr = pcec_message->content.msg.header >> 4;
     unsigned char index = cec_global_info.my_node_index;
     unsigned short phy_addr = (pcec_message->content.msg.operands[0] << 8) | pcec_message->content.msg.operands[1];
-
-    //hdmitx_cec_dbg_print("\n-------function:%s,file:%s,line:%d--phy_addr:%u---\n",__FUNCTION__,__FILE__,__LINE__,phy_addr);
-    //hdmitx_cec_dbg_print("\n-------function:%s,file:%s,line:%d--cec_global_info.cec_node_info[index].phy_addr.phy_addr_4:%u---\n",__FUNCTION__,__FILE__,__LINE__,cec_global_info.cec_node_info[index].phy_addr.phy_addr_4);
-        
+    unsigned char phy_addr_ab = (aml_read_reg32(P_AO_DEBUG_REG1) >> 8) & 0xff;
+    unsigned char phy_addr_cd = aml_read_reg32(P_AO_DEBUG_REG1) & 0xff;  
+            
     //if (cec_global_info.dev_mask & (1 << log_addr)) {
-    if((hdmi_cec_func_config >> CEC_FUNC_MSAK) & 0x1){    
-        if((hdmi_cec_func_config >> AUTO_POWER_ON_MASK) & 0x1)
+    if(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)) {    
+        if(hdmitx_device->cec_func_config & (1 << AUTO_POWER_ON_MASK))
         {    
             if (phy_addr == cec_global_info.cec_node_info[index].phy_addr.phy_addr_4) {    
                 unsigned char msg[4];
                 msg[0] = ((index & 0xf) << 4) | CEC_BROADCAST_ADDR;
                 msg[1] = CEC_OC_ACTIVE_SOURCE;
-                msg[2] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.ab;
-                msg[3] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.cd;
-                cec_ll_tx(msg, 4, NULL);
+                msg[2] = phy_addr_ab;
+                msg[3] = phy_addr_cd;
+                //msg[2] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.ab;
+                //msg[3] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.cd;
+                cec_ll_tx(msg, 4);
             }
         }
     }
@@ -1573,31 +1461,27 @@ void cec_request_active_source(cec_rx_message_t* pcec_message)
 
 void cec_give_device_power_status(cec_rx_message_t* pcec_message)
 {
-    unsigned char log_addr = pcec_message->content.msg.header >> 4;
     unsigned char index = cec_global_info.my_node_index;
+    unsigned char msg[3];
 
     //if (cec_global_info.dev_mask & (1 << log_addr)) {
-        unsigned char msg[3];
-        msg[0] = ((index & 0xf) << 4) | log_addr;
+        msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
         msg[1] = CEC_OC_REPORT_POWER_STATUS;
         msg[2] = cec_global_info.cec_node_info[index].power_status;
-        cec_ll_tx(msg, 3, NULL);
+        cec_ll_tx(msg, 3);
     //}
 }
 
-void cec_inactive_source(void)
+void cec_set_imageview_on_irq(void)
 {
     unsigned char index = cec_global_info.my_node_index;
-    unsigned char msg[4];
+    unsigned char msg[2];
     
     msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
-    msg[1] = CEC_OC_INACTIVE_SOURCE;
-	msg[2] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.ab;
-	msg[3] = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.cd;
+    msg[1] = CEC_OC_IMAGE_VIEW_ON;
 
-    cec_ll_tx_irq(msg, 4);    
+    cec_ll_tx(msg, 2);    
 }
-EXPORT_SYMBOL(cec_inactive_source);
 
 void cec_deactive_source(cec_rx_message_t* pcec_message)
 {
@@ -1621,14 +1505,16 @@ void cec_deactive_source(cec_rx_message_t* pcec_message)
 
 void cec_get_version(cec_rx_message_t* pcec_message)
 {
-    unsigned char log_addr = pcec_message->content.msg.header >> 4;
-    //if (cec_global_info.dev_mask & (1 << log_addr)) {
-        unsigned char msg[3];
-        msg[0] = log_addr;
+    unsigned char dest_log_addr = pcec_message->content.msg.header&0xf;
+    unsigned char index = cec_global_info.my_node_index;
+    unsigned char msg[3];
+
+    if (0xf != dest_log_addr) {
+        msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
         msg[1] = CEC_OC_CEC_VERSION;
         msg[2] = CEC_VERSION_13A;
-        cec_ll_tx(msg, 3, NULL);
-    //}
+        cec_ll_tx(msg, 3);
+    }
 }
 
 void cec_give_deck_status(cec_rx_message_t* pcec_message)
@@ -1653,29 +1539,39 @@ void cec_deck_status(cec_rx_message_t* pcec_message)
         hdmirx_cec_dbg_print("cec_deck_status: %x\n", cec_global_info.cec_node_info[index].specific_info.playback.deck_info);
     }
 }
+
+// STANDBY: long press our remote control, send STANDBY to TV
 void cec_set_standby(void)
 {
     unsigned char index = cec_global_info.my_node_index;
     unsigned char msg[9];
-
     msg[0] = ((index & 0xf) << 4) | CEC_BROADCAST_ADDR;
     msg[1] = CEC_OC_STANDBY;
-
-    cec_ll_tx_irq(msg, 2);
+    if(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)) {
+        if(hdmitx_device->cec_func_config & (1 << ONE_TOUCH_STANDBY_MASK)) {
+			cec_ll_tx(msg, 2);
+			//mdelay(100);
+			cec_rx_flag = 0;
+			//cec_pending_flag == TV_CEC_PENDING_ON;
+			//WRITE_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_STAT_CLR, READ_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_STAT_CLR) | (1 << 23));    // Clear the interrupt
+			//WRITE_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_MASK, READ_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_MASK) & ~(1 << 23)); //disable cec int
+			//cec_hw_off();
+		}
+	}
 }
-EXPORT_SYMBOL(cec_set_standby);
 
 void cec_set_osd_name(cec_rx_message_t* pcec_message)
 {
     unsigned char index = cec_global_info.my_node_index;
+    unsigned char src_log_addr = (pcec_message->content.msg.header >> 4 )&0xf;
     unsigned char msg[9];
     
     //"PHILIPS HMP8100"
-    msg[0] = ((index & 0xf) << 4) | CEC_TV_ADDR;
+    msg[0] = ((index & 0xf) << 4) | src_log_addr;
     msg[1] = CEC_OC_SET_OSD_NAME;
     memcpy(&msg[2], "HMP8100", strlen("HMP8100"));
 
-    cec_ll_tx(msg, 9, NULL);
+    cec_ll_tx(msg, 9);
 }
 void cec_vendor_cmd_with_id(cec_rx_message_t* pcec_message)
 {
@@ -1696,8 +1592,11 @@ void cec_vendor_cmd_with_id(cec_rx_message_t* pcec_message)
 
 void cec_set_menu_language(cec_rx_message_t* pcec_message)
 {
-//    unsigned char log_addr = pcec_message->content.msg.header >> 4;
+
     unsigned char index = cec_global_info.my_node_index;
+    unsigned char src_log_addr = (pcec_message->content.msg.header >> 4 )&0xf;
+    
+     if(0x0 == src_log_addr) {
     //if (cec_global_info.dev_mask & (1 << index)) {
         //if (pcec_message->operand_num == 3) {
             int i;
@@ -1713,7 +1612,8 @@ void cec_set_menu_language(cec_rx_message_t* pcec_message)
                 if (menu_lang_array[i] == tmp)
                     break;
             }
-
+            if(6 == i)
+                return;
             cec_global_info.cec_node_info[index].menu_lang = i;
 			switch_set_state(&lang_dev, cec_global_info.cec_node_info[index].menu_lang);
 			
@@ -1722,6 +1622,9 @@ void cec_set_menu_language(cec_rx_message_t* pcec_message)
             hdmirx_cec_dbg_print("cec_set_menu_language: %x\n", cec_global_info.cec_node_info[index].menu_lang);
         //}
     //}
+    }else{
+        cec_feature_abort(pcec_message);
+    }
 }
 
 void cec_handle_message(cec_rx_message_t* pcec_message)
@@ -1732,7 +1635,7 @@ void cec_handle_message(cec_rx_message_t* pcec_message)
     unsigned char   msg_length;
 
     /* parse message */
-    if ((!pcec_message) || (check_cec_msg_valid(pcec_message) == 0)) return;
+    if ((!pcec_message) || (check_cec_msg_valid(pcec_message) == 0)) //return;
 
     initiator	= pcec_message->content.msg.header >> 4;
     follower	= pcec_message->content.msg.header & 0x0f;
@@ -1743,9 +1646,12 @@ void cec_handle_message(cec_rx_message_t* pcec_message)
 
     
     /* process messages from tv polling and cec devices */
-    printk("OP code: 0x%x\n", opcode);
-    if(((hdmi_cec_func_config>>CEC_FUNC_MSAK) & 0x1) && cec_power_flag)
+    hdmitx_cec_dbg_print("OP code: 0x%x\n", opcode);
+    hdmitx_cec_dbg_print("cec_power_flag: 0x%x\n", cec_power_flag);
+    hdmitx_cec_dbg_print("cec: cec_func_config: 0x%x\n", hdmitx_device->cec_func_config);
+    if((hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)) && cec_power_flag)
     {    
+
         switch (opcode) {
         case CEC_OC_ACTIVE_SOURCE:
             //cec_active_source(pcec_message);
@@ -1755,10 +1661,10 @@ void cec_handle_message(cec_rx_message_t* pcec_message)
             //cec_deactive_source(pcec_message);
             break;
         case CEC_OC_CEC_VERSION:
-            cec_report_version(pcec_message);
+            //cec_report_version(pcec_message);
             break;
         case CEC_OC_DECK_STATUS:
-            cec_deck_status(pcec_message);
+            //cec_deck_status(pcec_message);
             break;
         case CEC_OC_DEVICE_VENDOR_ID:
             //cec_device_vendor_id(pcec_message);
@@ -1774,12 +1680,13 @@ void cec_handle_message(cec_rx_message_t* pcec_message)
             break;
         case CEC_OC_MENU_STATUS:
             //cec_menu_status(pcec_message);
+            //cec_menu_status_smp(DEVICE_MENU_INACTIVE);
             break;
         case CEC_OC_REPORT_PHYSICAL_ADDRESS:
             cec_report_phy_addr(pcec_message);
             break;
         case CEC_OC_REPORT_POWER_STATUS:
-            cec_report_power_status(pcec_message);
+            //cec_report_power_status(pcec_message);
             break;
         case CEC_OC_SET_OSD_NAME:
             //cec_set_osd_name(pcec_message);
@@ -1797,8 +1704,8 @@ void cec_handle_message(cec_rx_message_t* pcec_message)
             cec_usrcmd_set_report_physical_address();
             break;
         case CEC_OC_GIVE_DEVICE_VENDOR_ID:
-            cec_feature_abort(pcec_message);
-            //cec_device_vendor_id(pcec_message);
+            //cec_feature_abort(pcec_message);
+            cec_device_vendor_id(pcec_message);
             //cec_usrcmd_set_device_vendor_id();
             break;
         case CEC_OC_GIVE_OSD_NAME:
@@ -1807,9 +1714,9 @@ void cec_handle_message(cec_rx_message_t* pcec_message)
             //cec_usrcmd_set_osd_name(pcec_message);
             break;
         case CEC_OC_STANDBY:
-        	//printk("----cec_standby-----");
-        	cec_menu_status(pcec_message);
-        	cec_deactive_source(pcec_message);
+            hdmitx_cec_dbg_print("CEC: system standby\n");
+        	//cec_menu_status_smp(DEVICE_MENU_INACTIVE);
+            cec_deactive_source(pcec_message);
             cec_standby(pcec_message);
             break;
         case CEC_OC_SET_STREAM_PATH:
@@ -1823,11 +1730,11 @@ void cec_handle_message(cec_rx_message_t* pcec_message)
             cec_give_device_power_status(pcec_message);
             break;
         case CEC_OC_USER_CONTROL_PRESSED:
-            //printk("----cec_user_control_pressed-----");
+            //hdmitx_cec_dbg_print("----cec_user_control_pressed-----");
             //cec_user_control_pressed(pcec_message);
             break;
         case CEC_OC_USER_CONTROL_RELEASED:
-            //printk("----cec_user_control_released----");
+            //hdmitx_cec_dbg_print("----cec_user_control_released----");
             //cec_user_control_released(pcec_message);
             break; 
         case CEC_OC_IMAGE_VIEW_ON:      //not support in source
@@ -1835,16 +1742,16 @@ void cec_handle_message(cec_rx_message_t* pcec_message)
             break;  
         case CEC_OC_ROUTING_CHANGE:
         case CEC_OC_ROUTING_INFORMATION:    	
-        	//cec_usrcmd_routing_information(pcec_message);	
+        	cec_usrcmd_routing_information(pcec_message);	
         	break;
         case CEC_OC_GIVE_AUDIO_STATUS:   	  
         	cec_report_audio_status();
         	break;
         case CEC_OC_MENU_REQUEST:
-            cec_menu_status_smp();
+            cec_menu_status(pcec_message);
             break;
         case CEC_OC_PLAY:
-            printk("CEC_OC_PLAY:0x%x\n",pcec_message->content.msg.operands[0]);        
+            hdmitx_cec_dbg_print("CEC_OC_PLAY:0x%x\n",pcec_message->content.msg.operands[0]);        
             switch(pcec_message->content.msg.operands[0]){
                 case 0x24:
                     input_event(remote_cec_dev, EV_KEY, KEY_PLAYPAUSE, 1);
@@ -1863,7 +1770,7 @@ void cec_handle_message(cec_rx_message_t* pcec_message)
             }
             break;
         case CEC_OC_DECK_CONTROL:
-            printk("CEC_OC_DECK_CONTROL:0x%x\n",pcec_message->content.msg.operands[0]);        
+            hdmitx_cec_dbg_print("CEC_OC_DECK_CONTROL:0x%x\n",pcec_message->content.msg.operands[0]);        
             switch(pcec_message->content.msg.operands[0]){
                 case 0x3:
                     input_event(remote_cec_dev, EV_KEY, KEY_STOP, 1);
@@ -2094,16 +2001,15 @@ void cec_usrcmd_get_active_source(void)
 void cec_usrcmd_set_active_source(void)
 {
     unsigned char index = cec_global_info.my_node_index;
-    unsigned char phy_addr_ab = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.ab;
-    unsigned char phy_addr_cd = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.cd;
+    //unsigned char phy_addr_ab = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.ab;
+    //unsigned char phy_addr_cd = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.cd;
+    unsigned char phy_addr_ab = (aml_read_reg32(P_AO_DEBUG_REG1) >> 8) & 0xff;
+    unsigned char phy_addr_cd = aml_read_reg32(P_AO_DEBUG_REG1) & 0xff;  
+        
+    hdmitx_cec_dbg_print("phy_addr_ab:%x\n", phy_addr_ab);
+    hdmitx_cec_dbg_print("phy_addr_cd:%x\n", phy_addr_cd);
+    hdmitx_cec_dbg_print("Physical address: 0x%x\n",aml_read_reg32(P_AO_DEBUG_REG1));
     
-    printk("phy_addr_ab:%x\n", phy_addr_ab);
-    printk("phy_addr_cd:%x\n", phy_addr_cd);
-    printk("Physical address: 0x%x\n",aml_read_reg32(P_AO_DEBUG_REG1));
-    
-    phy_addr_ab = (aml_read_reg32(P_AO_DEBUG_REG1) >> 8) & 0xff;
-    phy_addr_cd = aml_read_reg32(P_AO_DEBUG_REG1) & 0xff;
-
     MSG_P2(index, CEC_BROADCAST_ADDR, 
             CEC_OC_ACTIVE_SOURCE,
 			phy_addr_ab,
@@ -2225,11 +2131,14 @@ void cec_usrcmd_routing_information(cec_rx_message_t* pcec_message)
     
     //unsigned char phy_addr_ab = pcec_message->content.msg.operands[2];
     //unsigned char phy_addr_cd = pcec_message->content.msg.operands[3];
-    unsigned char phy_addr_ab = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.ab;
-    unsigned char phy_addr_cd = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.cd;
-    printk("phy_addr_ab:%x\n", phy_addr_ab);
-    printk("phy_addr_cd:%x\n", phy_addr_cd);
-    printk("Physical address: 0x%x\n",aml_read_reg32(P_AO_DEBUG_REG1));
+    //unsigned char phy_addr_ab = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.ab;
+    //unsigned char phy_addr_cd = cec_global_info.cec_node_info[index].phy_addr.phy_addr_2.cd;
+    unsigned char phy_addr_ab = (aml_read_reg32(P_AO_DEBUG_REG1) >> 8) & 0xff;
+    unsigned char phy_addr_cd = aml_read_reg32(P_AO_DEBUG_REG1) & 0xff;
+
+    hdmitx_cec_dbg_print("phy_addr_ab:%x\n", phy_addr_ab);
+    hdmitx_cec_dbg_print("phy_addr_cd:%x\n", phy_addr_cd);
+    hdmitx_cec_dbg_print("----Physical address---: 0x%x\n",aml_read_reg32(P_AO_DEBUG_REG1));
     //MSG_P2( index, CEC_BROADCAST_ADDR, 
     //        CEC_OC_ROUTING_INFORMATION, 
     //                    phy_addr_ab,
@@ -2241,8 +2150,8 @@ void cec_usrcmd_routing_information(cec_rx_message_t* pcec_message)
     msg[0] = ((index & 0xf) << 4) | CEC_BROADCAST_ADDR;
     msg[1] = CEC_OC_ROUTING_INFORMATION;
     msg[2] = phy_addr_ab;
-    msg[2] = phy_addr_cd;
-    cec_ll_tx(msg, 4, NULL);
+    msg[3] = phy_addr_cd;
+    cec_ll_tx(msg, 4);
 
 }
 /***************************** cec middle level code end *****************************/
@@ -2250,20 +2159,23 @@ void cec_usrcmd_routing_information(cec_rx_message_t* pcec_message)
 
 /***************************** cec high level code *****************************/
 
-void cec_init(hdmitx_dev_t* hdmitx_device)
+static int __init cec_init(void)
 {
     int i;    
-    if(!((hdmi_cec_func_config>>CEC_FUNC_MSAK) & 0x1)){
-        printk("CEC not init\n");
-        return ;
+    extern hdmitx_dev_t * get_hdmitx_device(void);
+    hdmitx_device = get_hdmitx_device();
+    cec_key_init();
+
+    if(!(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK))) {
+        hdmitx_cec_dbg_print("CEC not init\n");
+        return 0;
     }
-    printk("CEC init\n");    
+    else {
+        hdmitx_cec_dbg_print("CEC init\n");
+    }
+
     hdmi_wr_reg(CEC0_BASE_ADDR+CEC_CLOCK_DIV_H, 0x00 );
     hdmi_wr_reg(CEC0_BASE_ADDR+CEC_CLOCK_DIV_L, 0xf0 );
-
-
-// ?????
-//    if (cec_init_flag == 1) return;
 
     cec_rx_msg_buf.rx_write_pos = 0;
     cec_rx_msg_buf.rx_read_pos = 0;
@@ -2283,20 +2195,20 @@ void cec_init(hdmitx_dev_t* hdmitx_device)
     if(request_irq(INT_HDMI_CEC, &cec_isr_handler,
                 IRQF_SHARED, "amhdmitx-cec",
                 (void *)hdmitx_device)){
-        printk("HDMI CEC:Can't register IRQ %d\n",INT_HDMI_CEC);
-        return;               
+        hdmitx_cec_dbg_print("HDMI CEC:Can't register IRQ %d\n",INT_HDMI_CEC);
+        return -EFAULT;               
     }
 
     remote_cec_dev = input_allocate_device();   
     if (!remote_cec_dev)                          
     {  
-        printk(KERN_ERR "remote_cec.c: Not enough memory\n");   
+        hdmitx_cec_dbg_print(KERN_ERR "remote_cec.c: Not enough memory\n");   
     }
     remote_cec_dev->name = "cec_input";
    
-    //printk("\n--111--function:%s,line:%d,count:%d\n",__FUNCTION__,__LINE__,tasklet_cec.count);
+    //hdmitx_cec_dbg_print("\n--111--function:%s,line:%d,count:%d\n",__FUNCTION__,__LINE__,tasklet_cec.count);
    // tasklet_enable(&tasklet_cec);
-    //printk("\n--222--function:%s,line:%d,count:%d\n",__FUNCTION__,__LINE__,tasklet_cec.count);
+    //hdmitx_cec_dbg_print("\n--222--function:%s,line:%d,count:%d\n",__FUNCTION__,__LINE__,tasklet_cec.count);
       //tasklet_cec.data = (unsigned long)remote_cec;
                                            
     remote_cec_dev->evbit[0] = BIT_MASK(EV_KEY);      
@@ -2305,31 +2217,31 @@ void cec_init(hdmitx_dev_t* hdmitx_device)
           set_bit( i, remote_cec_dev->keybit);
       }
                    
-    if (input_register_device(remote_cec_dev))  
-    {  
-        printk(KERN_ERR "remote_cec.c: Failed to register device\n");  
+    if(input_register_device(remote_cec_dev)) {  
+        hdmitx_cec_dbg_print(KERN_ERR "remote_cec.c: Failed to register device\n");  
         input_free_device(remote_cec_dev);   
-    }  
-    return;
+    }
+
+    hdmitx_device->cec_init_ready = 1;
+
+    cec_gpi_init();
+    cec_node_init(hdmitx_device);
+    return 0;
 }
 
-void cec_uninit(hdmitx_dev_t* hdmitx_device)
+static void __exit cec_uninit(void)
 {
-    if(!((hdmi_cec_func_config>>CEC_FUNC_MSAK) & 0x1)){
+    if(!(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK))) {
         return ;
     }
-    printk("CEC: cec uninit!\n");
+    hdmitx_cec_dbg_print("CEC: cec uninit!\n");
     if (cec_init_flag == 1) {
         WRITE_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_MASK, READ_MPEG_REG(SYS_CPU_0_IRQ_IN1_INTR_MASK) & ~(1 << 23));            // Disable the hdmi cec interrupt
         free_irq(INT_HDMI_CEC, (void *)hdmitx_device);
         cec_init_flag = 0;
     }
+    hdmitx_device->cec_init_ready = 0;
     input_unregister_device(remote_cec_dev);    
-}
-
-void cec_set_pending(tv_cec_pending_e on_off)
-{
-    cec_pending_flag = on_off;
 }
 
 size_t cec_usrcmd_get_global_info(char * buf)
@@ -2349,15 +2261,15 @@ size_t cec_usrcmd_get_global_info(char * buf)
     buf[0] = dev_num;
     buf[1] = cec_global_info.active_log_dev;
 #if 0
-    printk("\n");
-    printk("%x\n",(unsigned int)(((cec_global_info_to_usr_t*)0)->cec_node_info_online));
-    printk("%x\n", ((cec_global_info_to_usr_t*)buf)->dev_number);
-    printk("%x\n", ((cec_global_info_to_usr_t*)buf)->active_log_dev);
-    printk("%x\n", ((cec_global_info_to_usr_t*)buf)->cec_node_info_online[0].hdmi_port);
+    hdmitx_cec_dbg_print("\n");
+    hdmitx_cec_dbg_print("%x\n",(unsigned int)(((cec_global_info_to_usr_t*)0)->cec_node_info_online));
+    hdmitx_cec_dbg_print("%x\n", ((cec_global_info_to_usr_t*)buf)->dev_number);
+    hdmitx_cec_dbg_print("%x\n", ((cec_global_info_to_usr_t*)buf)->active_log_dev);
+    hdmitx_cec_dbg_print("%x\n", ((cec_global_info_to_usr_t*)buf)->cec_node_info_online[0].hdmi_port);
     for (i=0; i < (sizeof(cec_node_info_t) * dev_num) + 2; i++) {
-        printk("%x,",buf[i]);
+        hdmitx_cec_dbg_print("%x,",buf[i]);
     }
-    printk("\n");
+    hdmitx_cec_dbg_print("\n");
 #endif
     return (sizeof(cec_node_info_t) * dev_num) + (unsigned int)(((cec_global_info_to_usr_t*)0)->cec_node_info_online);
 }
@@ -2379,11 +2291,10 @@ void cec_usrcmd_set_config(const char * buf, size_t count)
 {
     int i = 0;
     int j = 0;
-//    int bool = 0;
     char param[16] = {0};
 
     if(count > 32){
-        printk("CEC: too many args\n");
+        hdmitx_cec_dbg_print("CEC: too many args\n");
     }
     for(i = 0; i < count; i++){
         if ( (buf[i] >= '0') && (buf[i] <= 'f') ){
@@ -2397,44 +2308,44 @@ void cec_usrcmd_set_config(const char * buf, size_t count)
     switch (param[0]) {
     case CEC_FUNC_MSAK:   
         if(param[1]){
-            hdmi_cec_func_config |= (1 << CEC_FUNC_MSAK);
-            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) | (hdmi_cec_func_config & 0xf));
+            hdmitx_device->cec_func_config |= (1 << CEC_FUNC_MSAK);
+            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) | (hdmitx_device->cec_func_config & 0xf));
         }else{
-            hdmi_cec_func_config &= ~(1 << CEC_FUNC_MSAK);
-            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) & (~(hdmi_cec_func_config & 0xf)));
+            hdmitx_device->cec_func_config &= ~(1 << CEC_FUNC_MSAK);
+            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) & (~(hdmitx_device->cec_func_config & 0xf)));
             break;
         }
     case ONE_TOUCH_PLAY_MASK:
         if(param[1]){
-            hdmi_cec_func_config |= (1 << ONE_TOUCH_PLAY_MASK);
-            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) | (hdmi_cec_func_config & 0xf));
+            hdmitx_device->cec_func_config |= (1 << ONE_TOUCH_PLAY_MASK);
+            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) | (hdmitx_device->cec_func_config & 0xf));
         }else{
-            hdmi_cec_func_config &= ~(1 << ONE_TOUCH_PLAY_MASK);
-            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) & (~(hdmi_cec_func_config & 0xf)));            
+            hdmitx_device->cec_func_config &= ~(1 << ONE_TOUCH_PLAY_MASK);
+            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) & (~(hdmitx_device->cec_func_config & 0xf)));            
             break;
         }
     case ONE_TOUCH_STANDBY_MASK:
         if(param[1]){
-            hdmi_cec_func_config |= (1 << ONE_TOUCH_STANDBY_MASK);
-            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) | (hdmi_cec_func_config & 0xf));
+            hdmitx_device->cec_func_config |= (1 << ONE_TOUCH_STANDBY_MASK);
+            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) | (hdmitx_device->cec_func_config & 0xf));
         }else{
-            hdmi_cec_func_config &= ~(1 << ONE_TOUCH_STANDBY_MASK);
-            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) & (~(hdmi_cec_func_config & 0xf)));            
+            hdmitx_device->cec_func_config &= ~(1 << ONE_TOUCH_STANDBY_MASK);
+            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) & (~(hdmitx_device->cec_func_config & 0xf)));            
             break;
         }
     case AUTO_POWER_ON_MASK:  
         if(param[1]){
-            hdmi_cec_func_config |= (1 << AUTO_POWER_ON_MASK);
-            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) | (hdmi_cec_func_config & 0xf));
+            hdmitx_device->cec_func_config |= (1 << AUTO_POWER_ON_MASK);
+            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) | (hdmitx_device->cec_func_config & 0xf));
         }else{
-            hdmi_cec_func_config &= ~(1 << AUTO_POWER_ON_MASK);
-            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) & (~(hdmi_cec_func_config & 0xf)));            
+            hdmitx_device->cec_func_config &= ~(1 << AUTO_POWER_ON_MASK);
+            aml_write_reg32(P_AO_DEBUG_REG0, aml_read_reg32(P_AO_DEBUG_REG0) & (~(hdmitx_device->cec_func_config & 0xf)));            
             break;
         }
     default:
         break;
     }
-    hdmirx_cec_dbg_print("hdmi_cec_func_config:0x%x \n",hdmi_cec_func_config);    
+    hdmirx_cec_dbg_print("cec: cec_func_config:0x%x \n",hdmitx_device->cec_func_config);
 }
 
 
@@ -2444,9 +2355,10 @@ void cec_usrcmd_set_dispatch(const char * buf, size_t count)
     int j = 0;
     int bool = 0;
     char param[16] = {0};
+    unsigned char msg[4] = {0};
 
     if(count > 32){
-        printk("CEC: too many args\n");
+        hdmitx_cec_dbg_print("CEC: too many args\n");
     }
     for(i = 0; i < count; i++){
         if ( (buf[i] >= '0') && (buf[i] <= 'f') ){
@@ -2538,10 +2450,213 @@ void cec_usrcmd_set_dispatch(const char * buf, size_t count)
         hdmitx_cec_dbg_print("\n-----POLLING_ONLINE_DEV------\n");
         cec_polling_online_dev(param[1], &bool);
         break;
+    case 0xff:
+
+        msg[0] = 0x40;
+        msg[1] = CEC_OC_FEATURE_ABORT;
+        msg[2] = 0;
+        msg[3] = CEC_UNRECONIZED_OPCODE;
+        
+        cec_ll_tx(msg, 4);
+        break;
     default:
         break;
     }
 }
 
 /***************************** cec high level code end *****************************/
+
+late_initcall(cec_init);
+module_exit(cec_uninit);
+MODULE_DESCRIPTION("AMLOGIC HDMI TX CEC driver");
+MODULE_LICENSE("GPL");
+MODULE_VERSION("1.0.0");
+
+
+MODULE_PARM_DESC(cec_msg_dbg_en, "\n cec_msg_dbg_en\n");
+module_param(cec_msg_dbg_en, bool, 0664);
+
+
+/*************************** cec arbitration cts code ******************************/
+// using the cec pin as fiq gpi to assist the bus arbitration
+
+struct _cec_msg_ {
+    unsigned char msg[16];
+    unsigned char len;
+};
+
+static struct _cec_msg_ cec_msg_bak;
+
+static unsigned long frame_time_log[512] = { 0 };
+static unsigned long frame_time_idx = 0;
+static int ack_check_point[16] = { 0 };
+static unsigned char msg_log_buf[128] = { 0 };
+static unsigned int cec_tx_start = 0;
+
+#define BUS_LEVEL()         (!!(aml_read_reg32(P_PREG_PAD_GPIO2_I) & (1<<13)))
+static void get_bus_free(void)
+{
+    unsigned int cnt = 0;
+    do {
+        frame_time_idx = 0;
+        while(!BUS_LEVEL()) {  // judge whether cec bus level is low
+            msleep(30);
+            cnt ++;
+            if(frame_time_idx != 0) {       // if frame_time_idx > 0, means the bus is busy
+                break;
+            }
+            if((frame_time_idx == 0) && (cnt > 33)) {       // test 1 second, if always low, return
+                pr_err("CEC: bus error, always low\n");
+                return ;
+            }
+        }
+        frame_time_idx = 0;
+        msleep(30);             // judge whether cec bus is busy
+        cnt ++;
+        if(cnt & (1 << 7)) {
+            pr_err("CEC: bus busy\n");
+        }
+    } while (frame_time_idx);   // frame_time_idx > 0, means that cec line is working
+}
+
+// return value: 1: successful      0: error
+static int cec_ll_tx_once(const unsigned char *msg, unsigned char len)
+{
+    int i;
+    unsigned int ret = 0xf;
+    unsigned int n;
+    int pos;
+
+    get_bus_free();
+    frame_time_idx = 0;
+
+    for (i = 0; i < len; i++) {
+     hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_0_HEADER + i, msg[i]);
+    }
+    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_LENGTH, len-1);
+    cec_tx_start = 1;
+    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_REQ_CURRENT);//TX_REQ_NEXT
+    msleep(len * 24 + 5);
+
+    ret = hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS);
+
+    if(ret == TX_DONE)
+        ret = 1;
+    else
+        ret = 0;
+
+    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_NO_OP);
+    cec_tx_start = 0;
+    if(cec_msg_dbg_en == 1) {
+        pos = 0;
+        pos += sprintf(msg_log_buf + pos, "CEC: tx msg len: %d   dat: ", len);
+        for(n = 0; n < len; n++) {
+            pos += sprintf(msg_log_buf + pos, "%02x ", msg[n]);
+        }
+        pos += sprintf(msg_log_buf + pos, "\nCEC: tx state: %d\n", ret);
+        msg_log_buf[pos] = '\0';
+        printk("%s", msg_log_buf);
+    }
+    return ret;
+}
+
+// Return value: 0: fail    1: success
+int cec_ll_tx(const unsigned char *msg, unsigned char len)
+{
+    int ret = 0;
+    int repeat = 0;
+    int i;
+
+    memset(&cec_msg_bak, 0, sizeof(cec_msg_bak));
+    memset(ack_check_point, 0, sizeof(ack_check_point));
+
+    // save msg
+    cec_msg_bak.len = len;
+    for(i = 0; i < len; i++) {
+        cec_msg_bak.msg[i] = msg[i];
+        ack_check_point[i] = (i + 1) * 20 + 1;
+    }
+    
+    // if transmit message error, try repeat(4) times
+    do {
+        ret = cec_ll_tx_once(msg, len);
+        repeat ++;
+        ret ? 0 : msleep(31);       // if transmit fails, wait 31ms and try send again
+    } while((ret == 0) && (repeat < 5));
+
+    cec_msg_dbg_en ? printk("cec: ret = %d\n", ret) : 0;
+    if(repeat > 1) {
+        cec_hw_reset();
+        printk("cec: try %d times\n", repeat);
+    }
+
+    return ret;
+}
+
+static inline int get_value(unsigned time_rise, unsigned time_fall)
+{
+    unsigned time;
+    if(time_rise > time_fall)
+        time = time_rise - time_fall;
+    else
+        time = ((unsigned int)(0xffffffff)) - time_fall + time_rise;
+    if((time > 1300) && (time < 1700))
+        return 0;
+    if((time > 400) && (time < 800))
+        return 1;
+    return -1;
+}
+
+static inline int need_check_ack(unsigned idx)
+{
+    int i;
+    for(i = 0; (ack_check_point[i]) && (i < 16) ; i++) {
+        if(ack_check_point[i] == idx) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void cec_gpi_receive_bits(void)
+{
+    int val = 0;
+    aml_set_reg32_bits(P_GPIO_INTR_EDGE_POL, BUS_LEVEL(), 16, 1);
+    if(!cec_tx_start)
+        return;
+    frame_time_log[frame_time_idx] = aml_read_reg32(P_ISA_TIMERE);
+
+    if(need_check_ack(frame_time_idx)) {
+        // ack rising position
+        val = get_value(frame_time_log[frame_time_idx], frame_time_log[frame_time_idx - 1]);
+
+        // if val == 1, and DES != 0xf
+        // if val == 0, and DES == 0xf
+        // means we need stop cec tx
+        if(((val == 1) ? ((cec_msg_bak.msg[0] & 0xf) != 0xf) : ((cec_msg_bak.msg[0] & 0xf) == 0xf)) || (val == -1)) {
+            hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_ABORT);       // stop cec tx
+        }
+    }
+    (512 == frame_time_idx) ? (frame_time_idx = 0) : frame_time_idx++;
+}
+
+static void cec_gpi_init(void)
+{
+    aml_set_reg32_bits(P_MEDIA_CPU_IRQ_IN2_INTR_MASK, 0, 0, 1);     // disable irq
+    aml_set_reg32_bits(P_MEDIA_CPU_IRQ_IN2_INTR_STAT_CLR, 1, 0, 1); // Write 1 to clear irq
+
+    aml_set_reg32_bits(P_GPIO_INTR_GPIO_SEL0, 0x76, 0, 8);      // set GPIOC_23 as GPIO IRQ #0 source
+    aml_set_reg32_bits(P_GPIO_INTR_EDGE_POL, 1, 0, 1);          // interrupt mode:  0: level     1: edge 
+    aml_set_reg32_bits(P_GPIO_INTR_EDGE_POL, 1, 16, 1);
+    request_fiq(INT_GPIO_0, &cec_gpi_receive_bits);
+    printk("cec: register fiq\n");
+
+    aml_set_reg32_bits(P_MEDIA_CPU_IRQ_IN2_INTR_MASK, 1, 0, 1);     // enable irq
+}
+
+// DELETE LATER, TEST ONLY
+void cec_test_(unsigned int cmd)
+{
+    printk("CEC: bus level: %s\n", BUS_LEVEL() ? "High" : "Low");
+}
 

@@ -84,20 +84,10 @@ static void hdmitx_dump_tvenc_reg(int cur_VIC, int printk_flag);
 static void hdmi_phy_suspend(void);
 static void hdmi_phy_wakeup(void);
 
-#if !defined(CEC0_LOG_ADDR)
-#define CEC0_LOG_ADDR 0x4
-#endif
-
 //#define HPD_DELAY_CHECK
-//#define CEC_SUPPORT
 
 //#define MORE_LOW_P
 #define LOG_EDID
-
-#ifdef CEC_SUPPORT
-static void cec_test_function(void);
-static irqreturn_t cec_handler(int irq, void *dev_instance);
-#endif
 
 #define HDMI_M1A 'a'
 #define HDMI_M1B 'b'
@@ -283,7 +273,7 @@ static void intr_handler(void *arg)
         hdmi_wr_only_reg(OTHER_BASE_ADDR + HDMI_OTHER_INTR_STAT_CLR,  1 << 2); //clear EDID rising interrupt in hdmi module 
     }
     if (!((data32 == 1) || (data32 == 2) || (data32 == 4))) {
-        hdmi_print(1,"HDMI Error: Unkown HDMI Interrupt Source, data32 = %x\n", data32);
+        hdmi_print(1,"HDMI Error: Unkown HDMI Interrupt Source\n");
         hdmi_wr_only_reg(OTHER_BASE_ADDR + HDMI_OTHER_INTR_STAT_CLR,  data32); //clear unkown interrupt in hdmi module 
     }
 //#ifdef AML_A3
@@ -307,8 +297,8 @@ static void hdmi_tvenc1080i_set(Hdmi_tx_video_para_t* param)
 {
     unsigned long VFIFO2VD_TO_HDMI_LATENCY = 2; // Annie 01Sep2011: Change value from 3 to 2, due to video encoder path delay change.
     unsigned long TOTAL_PIXELS, PIXEL_REPEAT_HDMI, PIXEL_REPEAT_VENC, ACTIVE_PIXELS;
-    unsigned FRONT_PORCH = 0, HSYNC_PIXELS, ACTIVE_LINES = 0, INTERLACE_MODE, TOTAL_LINES, SOF_LINES, VSYNC_LINES = 0;
-    unsigned LINES_F0 = 0, LINES_F1 = 0,BACK_PORCH, EOF_LINES = 0, TOTAL_FRAMES;
+    unsigned FRONT_PORCH = 0, HSYNC_PIXELS, ACTIVE_LINES, INTERLACE_MODE, TOTAL_LINES, SOF_LINES, VSYNC_LINES;
+    unsigned LINES_F0, LINES_F1,BACK_PORCH, EOF_LINES, TOTAL_FRAMES;
 
     unsigned long total_pixels_venc ;
     unsigned long active_pixels_venc;
@@ -1269,39 +1259,9 @@ void hdmi_hw_init(hdmitx_dev_t* hdmitx_device)
     //wire            pm_hdmi_cec_en              = pin_mux_reg0[2];
     //wire            pm_hdmi_hpd_5v_en           = pin_mux_reg0[1];
     //wire            pm_hdmi_i2c_5v_en           = pin_mux_reg0[0];
-#ifdef AML_A3
-    // --------------------------------------------------------
-    // Program core_pin_mux to enable HDMI pins
-    // --------------------------------------------------------
-    //wire            pm_gpioA_3_hdmi_cec         = pin_mux_reg0[3];
-    //wire            pm_gpioA_2_hdmi_scl         = pin_mux_reg0[2];
-    //wire            pm_gpioA_1_hdmi_sda         = pin_mux_reg0[1];
-    //wire            pm_gpioA_0_hdmi_hpd         = pin_mux_reg0[0];
-#ifdef CEC_SUPPORT
-    aml_write_reg32(P_PERIPHS_PIN_MUX_0, aml_read_reg32(P_PERIPHS_PIN_MUX_0)|((1 << 3) | // pm_gpioA_3_hdmi_cec
-                               (1 << 2) | // pm_gpioA_2_hdmi_scl
-                               (1 << 1) | // pm_gpioA_1_hdmi_sda
-                               (0 << 0 ))); // pm_gpioA_0_hdmi_hpd , enable this signal after all init done to ensure fist HPD rising ok
-#else
-    aml_write_reg32(P_PERIPHS_PIN_MUX_0, aml_read_reg32(P_PERIPHS_PIN_MUX_0)|((0 << 3) | // pm_gpioA_3_hdmi_cec
-                               (1 << 2) | // pm_gpioA_2_hdmi_scl
-                               (1 << 1) | // pm_gpioA_1_hdmi_sda
-                               (0 << 0 ))); // pm_gpioA_0_hdmi_hpd , enable this signal after all init done to ensure fist HPD rising ok
-#endif
 
-#else
-#ifdef CEC_SUPPORT
-    aml_write_reg32(P_PERIPHS_PIN_MUX_1, aml_read_reg32(P_PERIPHS_PIN_MUX_1)|((1 << 25) | // pm_hdmi_cec_en
-                               (0 << 22) | // pm_hdmi_hpd_5v_en , enable this signal after all init done to ensure fist HPD rising ok
-                               (1 << 23) | // pm_hdmi_i2c_sda_en
-                               (1 << 24))); // pm_hdmi_i2c_scl_en
-#else
-    aml_write_reg32(P_PERIPHS_PIN_MUX_1, aml_read_reg32(P_PERIPHS_PIN_MUX_1)|((1 << 25) | // pm_hdmi_cec_en
-                               (1 << 22) | // pm_hdmi_hpd_5v_en , enable this signal after all init done to ensure fist HPD rising ok
-                               (1 << 23) | // pm_hdmi_i2c_sda_en
-                               (1 << 24))); // pm_hdmi_i2c_scl_en
-#endif                               
-#endif
+
+    aml_set_reg32_bits(P_PERIPHS_PIN_MUX_1, !!(hdmitx_device->cec_func_config & (1 << CEC_FUNC_MSAK)), 25, 1);
 
     // Enable these interrupts: [2] tx_edit_int_rise [1] tx_hpd_int_fall [0] tx_hpd_int_rise
     hdmi_wr_reg(OTHER_BASE_ADDR + HDMI_OTHER_INTR_MASKN, 0x0);
@@ -1409,8 +1369,8 @@ void hdmi_hw_init(hdmitx_dev_t* hdmitx_device)
         delay_us(10);
 #endif        
     /**/
-    cec_init(hdmitx_device);
-    cec_set_pending(TV_CEC_PENDING_OFF);
+//    cec_init(hdmitx_device);
+//    cec_set_pending(TV_CEC_PENDING_OFF);
 }    
 
 // When 1080p50hz output, we shall manually configure
@@ -1993,6 +1953,7 @@ static unsigned char hdmitx_m3_getediddata(hdmitx_dev_t* hdmitx_device)
                 for(ii=0;ii<128;ii++){
                     hdmitx_device->EDID_buf[hdmitx_device->cur_edid_block*128+ii]
                         =hdmi_rd_reg(0x600+hdmitx_device->cur_phy_block_ptr*128+ii);
+
 #ifdef LOG_EDID
                     if((ii&0xf)==0)
                         edid_log_pos+=snprintf((char*)hdmitx_device->tmp_buf+edid_log_pos, HDMI_TMP_BUF_SIZE-edid_log_pos, "\n");
@@ -2153,6 +2114,7 @@ static void hdmitx_set_pll(Hdmi_tx_video_para_t *param)
 //                aml_set_reg32_bits(P_HHI_HDMI_CLK_CNTL, 1, 16, 4);   //cts_hdmi_tx_pixel_clk from clk_div2
 //            }
 //            else{
+
 //                aml_set_reg32_bits(P_HHI_HDMI_CLK_CNTL, 9, 16, 4);   //cts_hdmi_tx_pixel_clk from v2_clk_div2
 //            }
             set_vmode_clk(VMODE_576I);
@@ -2195,6 +2157,7 @@ static void hdmitx_set_pll(Hdmi_tx_video_para_t *param)
         default:
             break;
     }
+
     // Reset the exact pll for 148.5 and 74.25 MHz
     // if we find that current VCO outputs 1488,
     // then we will set to 1485, equals to 24MHz * 495 / 8, 
@@ -2631,6 +2594,7 @@ static int hdmitx_m3_set_audmode(struct hdmi_tx_dev_s* hdmitx_device, Hdmi_tx_au
         enable_audio_i2s();
 
 
+
     hdmitx_special_handler_audio(hdmitx_device);
 
     return 0;
@@ -2645,17 +2609,6 @@ static void hdmitx_m3_setupirq(hdmitx_dev_t* hdmitx_device)
                     (void *)hdmitx_device);
 //    aml_read_reg32(P_SYS_CPU_0_IRQ_IN1_INTR_STAT_CLR);
 //    aml_write_reg32(P_SYS_CPU_0_IRQ_IN1_INTR_MASK, aml_read_reg32(P_SYS_CPU_0_IRQ_IN1_INTR_MASK)|(1 << 25));
-
-#ifdef CEC_SUPPORT
-    //CEC
-   r = request_irq(INT_HDMI_CEC, &cec_handler,
-                    IRQF_SHARED, "amhdmitx",
-                    (void *)hdmitx_device);
-//    Wr(A9_0_IRQ_IN1_INTR_MASK, Rd(A9_0_IRQ_IN1_INTR_MASK)|(1 << 23));
-
-    //cec_test_function();
-#endif    
-
 #else
   AVRequestIrqContext(ISR_TYPE_GENERAL2, (1 << INT_HDMI_TX), intr_handler, NULL, (void *)hdmitx_device);  		         	   
 
@@ -2762,11 +2715,6 @@ static void hdmitx_m3_uninit(hdmitx_dev_t* hdmitx_device)
     //aml_read_reg32(P_SYS_CPU_0_IRQ_IN1_INTR_STAT_CLR);
     //aml_write_reg32(P_SYS_CPU_0_IRQ_IN1_INTR_MASK, aml_read_reg32(P_SYS_CPU_0_IRQ_IN1_INTR_MASK)&(~(1 << 25)));
     free_irq(INT_HDMI_TX, (void *)hdmitx_device);
-#ifdef CEC_SUPPORT
-    //CEC
-    //aml_write_reg32(P_SYS_CPU_0_IRQ_IN1_INTR_MASK, aml_read_reg32(P_SYS_CPU_0_IRQ_IN1_INTR_MASK)&(~(1 << 23)));
-    free_irq(INT_HDMI_CEC, (void *)hdmitx_device);
-#endif    
 #ifdef HPD_DELAY_CHECK
     del_timer(&hpd_timer);    
 #endif
@@ -2779,7 +2727,6 @@ static void hdmitx_m3_uninit(hdmitx_dev_t* hdmitx_device)
     unmux_hpd();
 }    
 
-// static unsigned int osd_reg_save = -1;
 static char hdcp_log_buf[HDMITX_HDCP_MONITOR_BUF_SIZE] = { 0 };
 const static hdcp_sub_t hdcp_monitor_array[] = {
     {"Aksv_shw", TX_HDCP_SHW_AKSV_0, 5},
@@ -3130,6 +3077,10 @@ static void hdmitx_m3_debug(hdmitx_dev_t* hdmitx_device, const char* buf)
             printk("set hdmi vic count = %d\n", hdmitx_device->vic_count);
         }
     }
+    else if(strncmp(tmpbuf, "cec", 3)==0) {
+        extern void cec_test_(unsigned int cmd);
+        cec_test_(tmpbuf[3] - '0');
+    }
     else if(strncmp(tmpbuf, "dumphdmireg", 11)==0){
         unsigned char reg_val = 0;
         unsigned int reg_adr = 0;
@@ -3201,11 +3152,6 @@ static void hdmitx_m3_debug(hdmitx_dev_t* hdmitx_device, const char* buf)
         use_tvenc_conf_flag = tmpbuf[10]-'0';
         printk("set use_tvenc_conf_flag = %d\n", use_tvenc_conf_flag);
     }
-#ifdef CEC_SUPPORT    
-    else if(tmpbuf[0]=='c'){
-        cec_test_function();
-    }
-#endif    
     else if(strncmp(tmpbuf, "ignore_unplug_on", 16)==0){
         hpd_debug_mode|=HPD_DEBUG_IGNORE_UNPLUG;
     }
@@ -3376,12 +3322,6 @@ void HDMITX_M1B_Init(hdmitx_dev_t* hdmitx_device)
 
     /**/    
     hdmi_hw_init(hdmitx_device);
-    
-#ifdef CEC_SUPPORT    
-    /*cec config*/
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_CLOCK_DIV_L, 0x003F ),
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0, (0x1 << 4) | CEC0_LOG_ADDR);
-#endif    
 }    
 
 #ifndef AVOS    
@@ -3412,100 +3352,6 @@ __setup("chip=",hdmi_chip_select);
 void hdmi_set_audio_para(int para)
 {
 	aud_para = para;
-
-}
-#endif
-
-#ifdef CEC_SUPPORT
-static int cec_echo_flag=1;    
-
-static void cec_test_function(void)
-{
-    /* use CEC0_LOG_ADDR as target address */
-    int i;
-    unsigned char tmp_log_addr = CEC0_LOG_ADDR+1;
-    int cec0_msgs[] = {(tmp_log_addr << 4) | CEC0_LOG_ADDR,
-                    0xa1, 0xb2, 0xc3, 0xd4
-                  };
-    int cec0_msg_length = 5;
-    cec_echo_flag=0;
-    printk("CEC test is starting!!!!!!!!\n");
-
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_LOGICAL_ADDR0, (0x1 << 4) | tmp_log_addr);
-
-    for (i = 0; i < cec0_msg_length; i++)
-    {
-        hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_0_HEADER + i, cec0_msgs[i]);
-    }
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_LENGTH, cec0_msg_length);
-    
-    //hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_REQ_CURRENT);
-    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_REQ_NEXT);
-
-}
-    
-// rx_msg_cmd
-#define RX_NO_OP                0  // No transaction
-#define RX_ACK_CURRENT          1  // Read earliest message in buffer
-#define RX_DISABLE              2  // Disable receiving latest message
-#define RX_ACK_NEXT             3  // Clear earliest message from buffer and read next message
-
-// rx_msg_status
-#define RX_IDLE                 0  // No transaction
-#define RX_BUSY                 1  // Receiver is busy
-#define RX_DONE                 2  // Message has been received successfully
-#define RX_ERROR                3  // Message has been received with error
-
-static irqreturn_t cec_handler(int irq, void *dev_instance)
-{
-    unsigned int data;
-    int i;
-    //hdmitx_dev_t* hdmitx_device = (hdmitx_dev_t*)dev_instance;
-    data = hdmi_rd_reg(CEC0_BASE_ADDR+CEC_RX_MSG_STATUS);
-    if(data){
-        printk("CEC Irq Rx Status %x\n", data);
-        if((data & 0x3) == RX_DONE) {
-            data = hdmi_rd_reg(CEC0_BASE_ADDR + CEC_RX_NUM_MSG);
-            if (data == 1)
-            {
-                int rx_msg_length = hdmi_rd_reg(CEC0_BASE_ADDR + CEC_RX_MSG_LENGTH);
-                for (i = 0; i < rx_msg_length; i++)
-                {
-                    data = hdmi_rd_reg(CEC0_BASE_ADDR + CEC_RX_MSG_0_HEADER +i);
-                    printk("cec0 rx message %x = %x\n", i, data);
-
-                    if(cec_echo_flag){ //for testing
-                        if(i==0)
-                            hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_0_HEADER + i, ((data>>4)&0xf)|((data<<4)&0xf0));
-                        else    
-                            hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_0_HEADER + i, data);
-                    }
-                }
-                hdmi_wr_reg(CEC0_BASE_ADDR + CEC_RX_MSG_CMD,  RX_ACK_CURRENT);
-
-                if(cec_echo_flag){ //for testing
-                    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_LENGTH, rx_msg_length);
-                    //hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_REQ_CURRENT);
-                    hdmi_wr_reg(CEC0_BASE_ADDR+CEC_TX_MSG_CMD, TX_REQ_NEXT);
-                }
-
-            }
-            else
-            {
-                printk("Error: CEC1->CEC0 transmit data fail, rx_num_msg = %x  !", data);
-            }
-        }
-        else {
-            printk("Error: CEC1->CEC0 transmit data fail, msg_status = %x!", data);
-        }
-        printk ("cec successful\n");
-    }
-
-    data = hdmi_rd_reg(CEC0_BASE_ADDR+CEC_TX_MSG_STATUS);
-    if(data){
-        printk("CEC Irq Tx Status %x\n", data);
-    }
-    return IRQ_HANDLED;
 
 }
 #endif
