@@ -238,12 +238,12 @@ err0:
     unregister_chrdev(major_spdif, DEVICE_NAME);
     return PTR_ERR(ptr_err);
 }
-static int __exit  audio_spdif_exit_module(void)
+static void __exit  audio_spdif_exit_module(void)
 {
     device_destroy(class_spdif, MKDEV(major_spdif, 0));
     class_destroy(class_spdif);
     unregister_chrdev(major_spdif, DEVICE_NAME);	
-    return 0;	
+    // return 0;	
 }
 module_init(audio_spdif_init_module);
 module_exit(audio_spdif_exit_module);
