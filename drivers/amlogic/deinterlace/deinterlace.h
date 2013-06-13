@@ -14,6 +14,14 @@
 #endif
 #endif
 
+#ifndef CONFIG_VSYNC_RDMA
+#ifndef VSYNC_WR_MPEG_REG
+#define VSYNC_WR_MPEG_REG(adr,val) WRITE_MPEG_REG(adr, val)
+#define VSYNC_WR_MPEG_REG_BITS(adr, val, start, len)  WRITE_MPEG_REG_BITS(adr, val, start, len)
+#endif
+#endif
+
+
 /************************************
 *    di hardware level interface
 *************************************/
