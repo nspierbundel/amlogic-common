@@ -111,6 +111,7 @@ static inline int internal_read(char __user *buf, int size, int intact)
     int len;
     int content = pcmenc_stream_content();
     int tail = 0;
+    unsigned long ret;
 
 
     if(intact){
@@ -127,16 +128,29 @@ static inline int internal_read(char __user *buf, int size, int intact)
 
         tail = log_stream.end - log_stream.rpointer;
         cache_invalidate(log_stream.rpointer, tail);
-        copy_to_user((void *)buf, (void *)(log_stream.rpointer), tail);
+        ret = copy_to_user((void *)buf, (void *)(log_stream.rpointer), tail);
+	if (ret) {
+	    printk("internal_read: Error copy_to_user: step 1: %ld\n", ret);
+	    // return -EINVAL;
+	}
 
         log_stream.rpointer = log_stream.start;
         cache_invalidate(log_stream.rpointer, len - tail);
-        copy_to_user((void *)(buf + tail), (void *)(log_stream.rpointer), len - tail);
+        ret = copy_to_user((void *)(buf + tail), (void *)(log_stream.rpointer), len - tail);
+	if (ret) {
+	    printk("internal_read: Error copy_to_user: step 2: %ld\n", ret);
+	    // return -EINVAL;
+	}
         log_stream.rpointer += len - tail;
 
     }else{
         cache_invalidate(log_stream.rpointer, len);
-        copy_to_user((void *)buf, (void *)(log_stream.rpointer), len);
+        ret = copy_to_user((void *)buf, (void *)(log_stream.rpointer), len);
+	if (ret) {
+	    printk("internal_read: Error copy_to_user: step 3: %ld\n", ret);
+	    // return -EINVAL;
+	}
+
         log_stream.rpointer += len;
     }
 
