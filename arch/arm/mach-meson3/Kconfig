@@ -1,2 +1,28 @@
 if ARCH_MESON3
+
+menu    "Meson Timer Setting"
+config MESON_TIMERA
+	bool "Enable EE Domain Timer A"
+	default y
+	help
+		Enable EE Timer A . if enable the timer is 1Mhz
+config MESON_TIMERB
+	bool "Enable EE Domain Timer B"
+	depends on !SMP || HAVE_ARM_TWD
+	default n
+	help
+		Enable EE Timer B . if enable the timer is 1Mhz
+config MESON_TIMERC
+	bool "Enable EE Domain Timer C"
+	default n
+	help
+		Enable EE Timer C . if enable the timer is 1Mhz
+config MESON_TIMERD
+	bool "Enable EE Domain Timer D"
+	depends on !SMP || HAVE_ARM_TWD
+	default n
+	help
+		Enable EE Timer D . if enable the timer is 1Mhz
+endmenu
+
 endif # ARCH_MESON3

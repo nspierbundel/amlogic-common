@@ -547,6 +547,12 @@
 #define GCLK_REG_VENC_L_TOP      (HHI_GCLK_MPEG2)
 #define GCLK_MASK_VENC_L_TOP      (1<<21)
 
+#define GCLK_IDX_UART3        107
+#define GCLK_NAME_UART3      "UART3"
+#define GCLK_DEV_UART3      "CLKGATE_UART3"
+#define GCLK_REG_UART3      (HHI_GCLK_MPEG2)
+#define GCLK_MASK_UART3      (1<<22)
+
 /**************************************************************/
 
 #define GCLK_IDX_VCLK2_VENCI         86
@@ -675,7 +681,33 @@
 #define GCLK_REG_VCLK2_OTHER1      (HHI_GCLK_OTHER)
 #define GCLK_MASK_VCLK2_OTHER1      (1<<26)
 
-#define GCLK_IDX_MAX 107
+/**************************************************************/
+
+#define GCLK_IDX_MEDIA_CPU         107
+#define GCLK_NAME_MEDIA_CPU      "MEDIA_CPU"
+#define GCLK_DEV_MEDIA_CPU      "CLKGATE_MEDIA_CPU"
+#define GCLK_REG_MEDIA_CPU      (HHI_GCLK_AO)
+#define GCLK_MASK_MEDIA_CPU      (1<<0)
+
+#define GCLK_IDX_AHB_SRAM         108
+#define GCLK_NAME_AHB_SRAM      "AHB_SRAM"
+#define GCLK_DEV_AHB_SRAM      "CLKGATE_AHB_SRAM"
+#define GCLK_REG_AHB_SRAM      (HHI_GCLK_AO)
+#define GCLK_MASK_AHB_SRAM      (1<<1)
+
+#define GCLK_IDX_AHB_BUS         109
+#define GCLK_NAME_AHB_BUS      "AHB_BUS"
+#define GCLK_DEV_AHB_BUS      "CLKGATE_AHB_BUS"
+#define GCLK_REG_AHB_BUS      (HHI_GCLK_AO)
+#define GCLK_MASK_AHB_BUS      (1<<2)
+
+#define GCLK_IDX_AO_REGS         110
+#define GCLK_NAME_AO_REGS      "AO_REGS"
+#define GCLK_DEV_AO_REGS      "CLKGATE_AO_REGS"
+#define GCLK_REG_AO_REGS      (HHI_GCLK_AO)
+#define GCLK_MASK_AO_REGS      (1<<3)
+
+#define GCLK_IDX_MAX 111
 extern unsigned char GCLK_ref[GCLK_IDX_MAX];
 
 #define REGISTER_CLK(_MOD) \

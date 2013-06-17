@@ -6,6 +6,13 @@
 #include <linux/cdev.h>
 #include "am_regs.h"
 #include <linux/earlysuspend.h>
+#include <mach/pinmux.h>
+#include <plat/regops.h>
+
+#ifdef CONFIG_CLK81_DFS
+#include <linux/semaphore.h>
+#define init_MUTEX(sem)             sema_init(sem, 1)
+#endif
 
 /** Register defination **/
 
@@ -106,7 +113,10 @@
 #define NFC_CMD_RB_INT(ce,time)        ((ce)|RB|(((ce>>10)^0xf)<<14)|(time&0x1f))
 #define NFC_CMD_RBIO(time,io)		   (RB|io|(time&0x1f))	
 #define NFC_CMD_RBIO_INT(io,time)      (RB|(((io>>10)^0x7)<<14)|(time&0x1f))
-#define NFC_CMD_SEED(seed)			   (SEED|seed&0x7fff)
+// vDorst: Old Code
+#define NFC_CMD_SEED(seed)                       (SEED|seed&0x7fff)
+// vDorst: New Code
+// #define NFC_CMD_SEED(seed)			   (SEED|(0xc2 + (seed&0x7fff)))
 #define NFC_CMD_STS(tim) 			   (STS|(tim&3))
 #define NFC_CMD_M2N(ran,ecc,sho,pgsz,pag)      ((ran?M2N:M2N_NORAN)|(ecc<<14)|(sho<<13)|((pgsz&0x7f)<<6)|(pag&0x3f))
 #define NFC_CMD_N2M(ran,ecc,sho,pgsz,pag)      ((ran?N2M:N2M_NORAN)|(ecc<<14)|(sho<<13)|((pgsz&0x7f)<<6)|(pag&0x3f))
@@ -292,7 +302,10 @@
 
 #define NAND_BLOCK_GOOD					0
 #define NAND_BLOCK_BAD					1
+#define NAND_FACTORY_BAD				2
+#define	FACTORY_BAD_BLOCK_ERROR  	159
 #define NAND_MINI_PART_SIZE				0x800000
+#define NAND_MINI_PART_BLOCKNUM			2
 #define NAND_MINI_PART_NUM				4
 #define MAX_BAD_BLK_NUM					2000
 #define MAX_MTD_PART_NUM				16
@@ -302,9 +315,30 @@
 #define BBT_TAIL_MAGIC					"bbte"
 #define MTD_PART_MAGIC					"anpt"
 
-#define CONFIG_ENV_SIZE         		0x2000
+#define CONFIG_ENV_SIZE         		0x8000
+
 #define ENV_SIZE (CONFIG_ENV_SIZE - (sizeof(uint32_t)))
 #define NAND_SYS_PART_SIZE				0x10000000
+
+#define ENV_NAND_SCAN_BLK                            50
+
+#define NAND_MINIKEY_PART_SIZE				0x800000
+#define NAND_MINIKEY_PART_NUM				4
+//#define NAND_MINIKEY_PART_BLOCKNUM			CONFIG_NAND_KEY_BLOCK_NUM
+#define NAND_MINIKEY_PART_BLOCKNUM			4
+//#define CONFIG_KEYSIZE         		(0x4000*1)
+#define CONFIG_KEYSIZE         		(0x4000*4)
+#define ENV_KEY_MAGIC					"keyx"
+#define KEYSIZE (CONFIG_KEYSIZE - 2*(sizeof(uint32_t)))
+#define  KEY_MAGIC_NAME    "nkey"
+struct menson_key{
+	char key_magic_name[4];
+	unsigned int 	crc;					/* CRC32 over data bytes	*/
+	unsigned char	data[KEYSIZE]; 	/* key data		*/
+};
+
+
+#define NAND_KEY_SAVE_MULTI_BLOCK  //key save in multi block same time
 
 struct aml_nand_flash_dev {
 	char *name;
@@ -332,7 +366,21 @@ struct aml_nand_bbt_info {
 	char bbt_head_magic[4];
 	int16_t nand_bbt[MAX_BAD_BLK_NUM];
 	struct aml_nand_part_info aml_nand_part[MAX_MTD_PART_NUM];
+#ifdef CONFIG_AML_NAND_KEY
+	struct menson_key aml_mensonkey;
+#endif
 	char bbt_tail_magic[4];
+};
+struct aml_nandkey_info_t {
+         struct mtd_info *mtd;
+         struct env_valid_node_t *env_valid_node;
+         struct env_free_node_t *env_free_node;
+         u_char env_valid;
+         u_char env_init;
+         u_char part_num_before_sys;
+         struct aml_nand_bbt_info nand_bbt_info;
+         int start_block;
+         int end_block;
 };
 
 struct env_valid_node_t {
@@ -340,6 +388,10 @@ struct env_valid_node_t {
 	int16_t	phy_blk_addr;
 	int16_t	phy_page_addr;
 	int timestamp;
+#ifdef NAND_KEY_SAVE_MULTI_BLOCK
+	int rd_flag;
+	struct env_valid_node_t *next;
+#endif
 };
 
 struct env_free_node_t {
@@ -379,6 +431,149 @@ struct aml_nand_bch_desc{
     unsigned user_byte_mode;
 };
 
+#define PROC_CONFIG_INFO	0xD901FF00
+#define POR_GET_1ST_CFG(a) (a&7)
+#define POR_1ST_NAND 7
+#define POR_1ST_NAND_RB 6
+#define POR_1ST_SPI 5
+#define POR_1ST_SPI_RESERVED 4
+#define POR_1ST_SDIO_C 3
+#define POR_1ST_SDIO_B 2
+#define POR_1ST_SDIO_A 1
+#define POR_1ST_NEVER_CHECKED 0
+#define POR_GET_2ND_CFG(a) ((a>>3)&3)
+#define POR_2ND_SDIO_B 3
+#define POR_2ND_SDIO_A 2
+#define POR_2ND_SDIO_C 1
+#define POR_2ND_NEVER_CHECKED 0
+#define POR_GET_CRYSTAL(a) ((a>>7)&1)
+#define POR_CRYSTAL_24M 1
+#define POR_CRYSTAL_25M 0
+#define POR_GET_USB_CFG(a) ((a>>8)&1)
+#define POR_USB_ENABLE 1
+#define POR_USB_DISABLE 0
+
+#define	NEW_NAND_SUPPORT	
+
+#ifdef NEW_NAND_SUPPORT
+#define RETRY_NAND_MAGIC		"refv"
+#define RETRY_NAND_BLK_NUM		2
+#define RETRY_NAND_COPY_NUM	4
+
+#define	READ_RETRY_REG_NUM   	8
+#define	READ_RETRY_CNT   		20
+
+
+#define	ENHANCE_SLC_REG_NUM   	5
+
+#define	READ_RETRY_ZERO   		((char)-1)
+#define	NAND_CMD_HYNIX_GET_VALUE				0x37
+#define	NAND_CMD_HYNIX_SET_VALUE_START		0x36
+#define	NAND_CMD_HYNIX_SET_VALUE_END		0x16
+
+#define	NAND_CMD_TOSHIBA_PRE_CON1			0x5c
+#define	NAND_CMD_TOSHIBA_PRE_CON2			0xc5
+#define	NAND_CMD_TOSHIBA_SET_VALUE			0x55
+#define	NAND_CMD_TOSHIBA_BEF_COMMAND1		0x26
+#define	NAND_CMD_TOSHIBA_BEF_COMMAND2		0x5d
+#define      NAND_CMD_SAMSUNG_SET_VALUE			0XA1
+#define      NAND_CMD_MICRON_SET_VALUE                       0XEF
+
+//for Hynix
+#define	HYNIX_26NM_8GB 		1		//H27UCG8T2M
+#define	HYNIX_26NM_4GB 		2		//H27UBG8T2BTR
+#define	HYNIX_20NM_8GB 		3		//
+#define	HYNIX_20NM_4GB 		4		//
+//for Toshiba
+#define	TOSHIBA_24NM 			20		//TC58NVG5D2HTA00
+										//TC58NVG6D2GTA00
+//for SAMSUNG
+#define	SUMSUNG_2XNM 			30	
+
+//for SANDISK
+#define      SANDISK_19NM			40
+
+#define      MICRON_20NM			10
+
+#define      DYNAMIC_REG_NUM        3
+#define      DYNAMIC_REG_INIT_NUM        9
+#define      DYNAMIC_READ_CNT_LOWER       15
+#define      DYNAMIC_READ_CNT_UPPER       19
+#define      DYNAMIC_CNT_LOWER       16
+#define      DYNAMIC_CNT_UPPER       20
+
+
+#define      DYNAMIC_READ_CASE_NUM        20
+
+
+#define	NAND_CMD_SANDISK_INIT_ONE				0x3B
+#define	NAND_CMD_SANDISK_INIT_TWO				0xB9
+
+#define	NAND_CMD_SANDISK_LOAD_VALUE_ONE			0x53
+#define	NAND_CMD_SANDISK_LOAD_VALUE_TWO			0x54
+
+#define	NAND_CMD_SANDISK_DYNAMIC_ENABLE			0xB6
+#define	NAND_CMD_SANDISK_DYNAMIC_DISABLE			0xD6
+#define 	NAND_CMD_SANDISK_SLC  						0xA2    
+
+
+
+
+
+struct aml_nand_read_retry{
+	u8	flag;
+	u8	reg_cnt;
+	u8	retry_cnt;
+	u8	default_flag;
+	u8	cur_cnt[MAX_CHIP_NUM];
+	u8	reg_addr[READ_RETRY_REG_NUM];
+	u8	reg_default_value[MAX_CHIP_NUM][READ_RETRY_REG_NUM];	
+	char	reg_offset_value[MAX_CHIP_NUM][READ_RETRY_CNT][READ_RETRY_REG_NUM];	
+	void	(*get_default_value)(struct mtd_info *mtd);
+	void	(*set_default_value)(struct mtd_info *mtd);
+	void	(*save_default_value)(struct mtd_info *mtd);
+	void	(*read_retry_handle)(struct mtd_info *mtd, int chipnr);
+	void	(*read_retry_exit)(struct mtd_info *mtd, int chipnr);
+};
+
+struct aml_nand_slc_program{
+	u8	flag;
+	u8	reg_cnt;
+	u8	reg_addr[ENHANCE_SLC_REG_NUM];
+	u8	reg_default_value[MAX_CHIP_NUM][ENHANCE_SLC_REG_NUM];	
+	char	reg_offset_value[ENHANCE_SLC_REG_NUM];
+	void	(*get_default_value)(struct mtd_info *mtd);
+	void	(*exit_enslc_mode)(struct mtd_info *mtd);
+	void	(*enter_enslc_mode)(struct mtd_info *mtd);
+};
+
+// this for sandisk dynamic read
+struct aml_nand_dynamic_read{
+	u8 slc_flag;
+	u8 dynamic_read_flag;
+	u8 read_case_num_max_lower_page;//Nmax	_lower_page
+	u8 read_case_num_max_upper_page;//Nmax_upper_page	
+	u8 cur_case_num_lower_page[MAX_CHIP_NUM];//N_lower_page	
+	u8 cur_case_num_upper_page[MAX_CHIP_NUM];//N_upper_page
+	u8	reg_addr_init[DYNAMIC_REG_INIT_NUM];
+	u8	reg_addr_lower_page[DYNAMIC_REG_NUM];	
+	u8	reg_addr_upper_page[DYNAMIC_REG_NUM];	
+	char	reg_offset_value_lower_page[DYNAMIC_CNT_LOWER][DYNAMIC_REG_NUM];		
+	char	reg_offset_value_upper_page[DYNAMIC_CNT_UPPER][DYNAMIC_REG_NUM];	
+	void	(*dynamic_read_init)(struct mtd_info *mtd);
+	void	(*dynamic_read_handle)(struct mtd_info *mtd, int page, int chipnr);
+	void	(*dynamic_read_exit)(struct mtd_info *mtd, int chipnr);
+	void	(*exit_slc_mode)(struct mtd_info *mtd);
+	void	(*enter_slc_mode)(struct mtd_info *mtd);
+};
+
+struct new_tech_nand_t{
+    u8	type;
+    struct aml_nand_slc_program slc_program_info;
+    struct aml_nand_read_retry read_rety_info;
+    struct aml_nand_dynamic_read dynamic_read_info;
+};
+#endif
 struct aml_nand_chip {
 
 	u8 mfr_type;
@@ -396,6 +591,10 @@ struct aml_nand_chip {
 	u8 internal_chipnr;
 	unsigned internal_page_nums;
 
+	unsigned int		  ran_mode; 			   //def close, for all part
+	unsigned int		  rbpin_mode;				   //may get from romboot 
+	unsigned int		  rbpin_detect;				   //add for rbpin auto detect
+	unsigned int		  short_pgsz;			   //zero means no short 
 	unsigned internal_chip_shift;
 	unsigned bch_mode;
 	u8 user_byte_mode;
@@ -417,12 +616,18 @@ struct aml_nand_chip {
     struct semaphore nand_sem;
     int lock_state;
 #endif
+	u8 ecc_cnt_limit;
+	u8 ecc_cnt_cur;
+	u8 ecc_max;
+    unsigned zero_cnt;
 
 	struct mtd_info			mtd;
 	struct nand_chip		chip;
 	struct aml_nandenv_info_t *aml_nandenv_info;
 	struct aml_nand_bch_desc 	*bch_desc;
-
+#ifdef NEW_NAND_SUPPORT
+	struct new_tech_nand_t  new_nand_info;
+#endif
 	/* platform info */
 	struct aml_nand_platform	*platform;
 
@@ -432,7 +637,13 @@ struct aml_nand_chip {
 	/* nand env device */
 	struct cdev				nand_env_cdev;
 
+	
+	struct aml_nandkey_info_t *aml_nandkey_info;
+	struct cdev				nand_key_cdev;
+
+
 	struct early_suspend nand_early_suspend;
+    struct class      cls;
 
 	//plateform operation function
 	void	(*aml_nand_hw_init)(struct aml_nand_chip *aml_chip);
@@ -458,6 +669,10 @@ struct aml_nand_platform {
 
 		unsigned T_REA;
 		unsigned T_RHOH;
+		unsigned int		  ran_mode; 			   //def close, for all part
+		unsigned int		  rbpin_mode;				   //may get from romboot 
+		unsigned int		  rbpin_detect;
+		unsigned int		  short_pgsz;			   //zero means no short 
 		 		
 		 struct aml_nand_chip  *aml_chip;
          struct platform_nand_data platform_nand_data;
@@ -466,19 +681,62 @@ struct aml_nand_platform {
 struct aml_nand_device {
 	struct aml_nand_platform *aml_nand_platform;
 	u8 dev_num;
+	struct notifier_block nb;
+};
+
+
+static pinmux_item_t nand_set_pins[] = {
+    {
+        .reg = PINMUX_REG(2),
+        .setmask = (0xf<<18)|(1 << 17)|(0x3 << 25),
+    },
+    {
+       .reg = PINMUX_REG(5),
+       .clrmask = ((1<<0) | (1<<1) | (1<<2) | (1<<3)),
+    },	
+    PINMUX_END_ITEM
+};
+
+static pinmux_item_t nand_clr_pins[] = {
+	{
+        .reg = PINMUX_REG(2),
+        .setmask = (0x3fF<<18) | (0X3 << 16),
+    },
+    {
+       .reg = PINMUX_REG(5),
+       .clrmask = ((1<<0) | (1<<1) | (1<<2) | (1<<3)),
+    },	
+    PINMUX_END_ITEM
+};
+
+static bool nand_chip_select(bool flag)
+{
+	return flag;
+}
+
+static pinmux_set_t nand_set = {
+    .chip_select = NULL,
+    .pinmux = &nand_set_pins[0]
+};
+
+static pinmux_set_t nand_clear = {
+    .chip_select = nand_chip_select,
+    .pinmux = &nand_clr_pins[0]
 };
 
 static void inline  nand_get_chip(void )
 {
-	SET_CBUS_REG_MASK(PREG_PAD_GPIO3_EN_N, 0x3ffff);
-	SET_CBUS_REG_MASK(PAD_PULL_UP_REG3, (0xff | (1<<16)));
-	SET_CBUS_REG_MASK(PERIPHS_PIN_MUX_5, ((1<<7) | (1 << 8) | (1 << 9)));
-	SET_CBUS_REG_MASK(PERIPHS_PIN_MUX_2, ((0xf<<18) | (1 << 17) | (0x3 << 25)));
+	aml_set_reg32_mask(P_PREG_PAD_GPIO3_EN_N, 0x3ffff);
+	aml_set_reg32_mask(P_PAD_PULL_UP_REG3, (0xff | (1<<16)));
+	//SET_CBUS_REG_MASK(PERIPHS_PIN_MUX_5, ((1<<7) | (1 << 8) | (1 << 9)));
+	//aml_set_reg32_mask(P_PERIPHS_PIN_MUX_2, ((0xf<<18) | (1 << 17) | (0x3 << 25)));
+	pinmux_set(&nand_set);  
 }
 static void inline nand_release_chip(void)
 {
-	CLEAR_CBUS_REG_MASK(PERIPHS_PIN_MUX_5, ((1<<7) | (1 << 8) | (1 << 9)));
-	CLEAR_CBUS_REG_MASK(PERIPHS_PIN_MUX_2, ((0x3fF<<18) | (0X3 << 16)));
+	//CLEAR_CBUS_REG_MASK(PERIPHS_PIN_MUX_5, ((1<<7) | (1 << 8) | (1 << 9)));
+	//aml_clr_reg32_mask(P_PERIPHS_PIN_MUX_2, ((0x3fF<<18) | (0X3 << 16)));
+	pinmux_clr(&nand_clear);    
 }
 
 static inline struct aml_nand_chip *to_nand_chip(struct platform_device *pdev)

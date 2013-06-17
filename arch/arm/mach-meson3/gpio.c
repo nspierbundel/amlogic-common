@@ -5,12 +5,14 @@ Linux PINMUX.C
 #include <linux/module.h>
 #include <stdarg.h>
 #include <linux/spinlock.h>
-#include <mach/am_regs.h>
+#include <linux/sched.h>
+#include <linux/io.h>
+#include <plat/io.h>
 #include <mach/gpio.h>
 #include <mach/gpio_data.h>
-#include <plat/regops.h>
-
+#include <mach/am_regs.h>
 #include "gpio_data.c"
+//#define DEBUG_PINMUX
 #ifndef DEBUG_PINMUX
 #define debug(a...)
 #else
@@ -20,7 +22,7 @@ Linux PINMUX.C
 #define set_pin_mux_reg(a,b)   if(b!=NOT_EXIST){  a[(b>>5)&0xf]|=(1<<(b&0x1f))  ;}
 static int32_t single_pin_pad(uint32_t  reg_en[P_PIN_MUX_REG_NUM], uint32_t  reg_dis[P_PIN_MUX_REG_NUM],uint32_t pad, uint32_t sig)
 {
-    
+
 	uint32_t enable,disable;
 	int32_t ret=-1;
 	foreach_pad_sig_start(pad,sig)
@@ -80,15 +82,15 @@ static int32_t caculate_single_pinmux_set(pinmux_item_t pinmux[P_PIN_MUX_REG_NUM
 	return 0;
 }
 /**
- * UTIL interface  
+ * UTIL interface
  * these function can be implement in a tools
  */
  /**
   * @return NULL is fail
-  * 		errno NOTAVAILABLE , 
+  * 		errno NOTAVAILABLE ,
   * 			  SOMEPIN IS LOCKED
   */
-static DEFINE_SPINLOCK(lock);
+static DEFINE_SPINLOCK(pinmux_set_lock);
 static uint32_t pimux_locktable[P_PIN_MUX_REG_NUM];
 pinmux_set_t* pinmux_cacl_str(char * pad,char * sig ,...)
 {
@@ -103,7 +105,7 @@ pinmux_set_t* pinmux_cacl_str(char * pad,char * sig ,...)
 EXPORT_SYMBOL(pinmux_cacl_str);
 pinmux_set_t* pinmux_cacl_int(uint32_t pad,uint32_t sig ,...)
 {
-#if 0	
+#if 0
 	va_list ap;
            int d;
            char c, *s;
@@ -127,12 +129,12 @@ pinmux_set_t* pinmux_cacl_int(uint32_t pad,uint32_t sig ,...)
                    break;
                }
            va_end(ap);
-#endif           
+#endif
 
 	printk(" %s , NOT IMPLENMENT\n",__func__);
     BUG();
 
-	
+
 	/**
 	 * @todo NOT implement;
 	 */
@@ -153,7 +155,7 @@ EXPORT_SYMBOL(pinmux_cacl);
 
 char ** pin_get_list(void)
 {
-	
+
 	 return (char **)&pad_name[0];
 }
 EXPORT_SYMBOL(pin_get_list);
@@ -211,28 +213,34 @@ uint32_t sig_pin(uint32_t sig)
 EXPORT_SYMBOL(sig_pin);
 /**
  * pinmux set function
- * @return 0, success , 
+ * @return 0, success ,
  * 		   SOMEPIN IS LOCKED, some pin is locked to the specail feature . You can not change it
  * 		   NOTAVAILABLE, not available .
  */
+
+static DECLARE_WAIT_QUEUE_HEAD(pinmux_wait_queue);
 int32_t pinmux_set(pinmux_set_t* pinmux )
 {
 	uint32_t locallock[P_PIN_MUX_REG_NUM];
     uint32_t reg,value,conflict,dest_value;
-	ulong flags;
 	int i;
-    
+	DECLARE_WAITQUEUE(wait, current);
 	if(pinmux==NULL)
+	{
+	    BUG();
 		return -4;
+	}
     debug( " pinmux addr %p \n",(pinmux->pinmux));
+retry:
 	memset(locallock,0,sizeof(locallock));
+	spin_lock(&pinmux_set_lock);
 	///check lock table
 	for(i=0;pinmux->pinmux[i].reg!=0xffffffff;i++)
 	{
         reg=pinmux->pinmux[i].reg;
         locallock[reg]=pinmux->pinmux[i].clrmask|pinmux->pinmux[i].setmask;
         dest_value=pinmux->pinmux[i].setmask;
-        
+
         conflict=locallock[reg]&pimux_locktable[reg];
 		if(conflict)
         {
@@ -240,8 +248,14 @@ int32_t pinmux_set(pinmux_set_t* pinmux )
             dest_value&=conflict;
             if(value!=dest_value)
             {
-                printk("set fail , detect locktable conflict");
-                return -1;///lock fail some pin is locked by others
+
+                printk("set fail , detect locktable conflict,retry");
+                set_current_state(TASK_UNINTERRUPTIBLE);
+                add_wait_queue(&pinmux_wait_queue, &wait);
+                spin_unlock(&pinmux_set_lock);
+                schedule();
+                remove_wait_queue(&pinmux_wait_queue, &wait);
+                goto retry;
             }
         }
 	}
@@ -249,69 +263,75 @@ int32_t pinmux_set(pinmux_set_t* pinmux )
 	{
 		if(pinmux->chip_select(true)==false){
             debug("error return -3");
+            spin_unlock(&pinmux_set_lock);
+            BUG();
 			return -3;///@select chip fail;
         }
 	}
-	
-	spin_lock_irqsave(&lock, flags);
+
 	for(i=0;pinmux->pinmux[i].reg!=0xffffffff;i++)
 	{
-        
+
         debug( "clrsetbits %08x %08x %08x \n",p_pin_mux_reg_addr[pinmux->pinmux[i].reg],pinmux->pinmux[i].clrmask,pinmux->pinmux[i].setmask);
     	pimux_locktable[pinmux->pinmux[i].reg]|=locallock[pinmux->pinmux[i].reg];
         clrsetbits_le32(p_pin_mux_reg_addr[pinmux->pinmux[i].reg],pinmux->pinmux[i].clrmask,pinmux->pinmux[i].setmask);
 	}
-	spin_unlock_irqrestore(&lock, flags);
+	spin_unlock(&pinmux_set_lock);
 	return 0;
 }
 EXPORT_SYMBOL(pinmux_set);
 int32_t pinmux_clr(pinmux_set_t* pinmux)
 {
-	ulong flags;
 	int i;
-    
+
 	if(pinmux==NULL)
+	{
+	    BUG();
 		return -4;
-    
-	if(pinmux->chip_select==NULL)///non share device , we should put the pins in same status always 
+	}
+
+	if(pinmux->chip_select==NULL)///non share device , we should put the pins in same status always
 		return 0;
+	spin_lock(&pinmux_set_lock);
+
 	pinmux->chip_select(false);
 	debug("pinmux_clr : %p" ,pinmux->pinmux);
-    spin_lock_irqsave(&lock, flags);
-	for(i=0;pinmux->pinmux[i].reg!=0xffffffff;i++)
+    for(i=0;pinmux->pinmux[i].reg!=0xffffffff;i++)
 	{
 		pimux_locktable[pinmux->pinmux[i].reg]&=~(pinmux->pinmux[i].clrmask|pinmux->pinmux[i].setmask);
 	}
 
-	
+
 	for(i=0;pinmux->pinmux[i].reg!=0xffffffff;i++)
 	{
         debug("clrsetbits %x %x %x",p_pin_mux_reg_addr[pinmux->pinmux[i].reg],pinmux->pinmux[i].setmask|pinmux->pinmux[i].clrmask,pinmux->pinmux[i].clrmask);
 		clrsetbits_le32(p_pin_mux_reg_addr[pinmux->pinmux[i].reg],pinmux->pinmux[i].setmask|pinmux->pinmux[i].clrmask,pinmux->pinmux[i].clrmask);
 	}
-	spin_unlock_irqrestore(&lock, flags);
+	wake_up(&pinmux_wait_queue);
+	spin_unlock(&pinmux_set_lock);
+
 	return 0;
 }
 EXPORT_SYMBOL(pinmux_clr);
 int32_t pinmux_set_locktable(pinmux_set_t* pinmux )
-{	
+{
 	ulong flags;
 	int i;
 	if(pinmux==NULL)
 		return -4;
-	spin_lock_irqsave(&lock, flags);
+	spin_lock_irqsave(&pinmux_set_lock, flags);
 	for(i=0;pinmux->pinmux[i].reg!=0xffffffff;i++)
 	{
 		pimux_locktable[pinmux->pinmux[i].reg]|=pinmux->pinmux[i].clrmask|pinmux->pinmux[i].setmask;
 		clrsetbits_le32(p_pin_mux_reg_addr[pinmux->pinmux[i].reg],pinmux->pinmux[i].clrmask,pinmux->pinmux[i].setmask);
 	}
-	spin_unlock_irqrestore(&lock, flags);
+	spin_unlock_irqrestore(&pinmux_set_lock, flags);
 	return 0;
 }
 EXPORT_SYMBOL(pinmux_set_locktable);
 
 /**
- * @return 0, success , 
+ * @return 0, success ,
  * 		   SOMEPIN IS LOCKED, some pin is locked to the specail feature . You can not change it
  * 		   NOTAVAILABLE, not available .
  */
@@ -341,7 +361,6 @@ bool gpio_get_status(uint32_t pin)
 {
 	unsigned bit,reg;
 
-	bool bret;
 	reg=(pad_gpio_bit[pin]>>5)&0xf;
 	bit=(pad_gpio_bit[pin])&0x1f;
 
@@ -384,6 +403,27 @@ int32_t gpio_out(uint32_t pin,bool high)
 	return -1;
 }
 EXPORT_SYMBOL(gpio_out);
+
+/**
+ * GPIO out function
+ */
+int32_t gpio_out_directly(uint32_t pin,bool high)
+{
+	unsigned bit,reg;
+		reg=(pad_gpio_bit[pin]>>5)&0xf;
+		bit=(pad_gpio_bit[pin])&0x1f;
+		if((p_gpio_out_addr[reg]&3)==2)
+		{
+			reg=p_gpio_out_addr[reg]&(~3);
+			bit+=16;
+		}else{
+		   reg=p_gpio_out_addr[reg];
+		}
+		clrsetbits_le32(reg,1<<bit,high<<bit);
+		return 0;
+
+}
+EXPORT_SYMBOL(gpio_out_directly);
 /**
  * GPIO in function .ls
  */
@@ -398,18 +438,18 @@ int32_t gpio_in_get(uint32_t pin)
 
 	reg=(pad_gpio_bit[pin]>>5)&0xf;
 	bit=(pad_gpio_bit[pin])&0x1f;
-	
-	
+
+
 	return (readl(p_gpio_in_addr[reg])>>bit)&1;
-	
+
 }
 EXPORT_SYMBOL(gpio_in_get);
 /**
  * Multi pin operation
- * @return 0, success , 
+ * @return 0, success ,
  * 		   SOMEPIN IS LOCKED, some pin is locked to the specail feature . You can not change it
  * 		   NOTAVAILABLE, not available .
- * 
+ *
  */
 
 gpio_set_t * gpio_out_group_cacl(uint32_t pin,uint32_t bits, ... )
@@ -440,10 +480,10 @@ EXPORT_SYMBOL(gpio_out_group_set);
 	 */
 	/**
 	 * Multi pin operation
-	 * @return 0, success , 
+	 * @return 0, success ,
 	 * 		   SOMEPIN IS LOCKED, some pin is locked to the specail feature . You can not change it
 	 * 		   NOTAVAILABLE, not available .
-	 * 
+	 *
 	 */
 gpio_set_t * gpio_in_group_cacl(uint32_t pin,uint32_t bits, ... )
 {
@@ -475,12 +515,12 @@ EXPORT_SYMBOL(gpio_in_group);
     //~ uint16_t   pad;
 //~ }gpio_irq_t;
 static gpio_irq_t gpio_irqs[8]={
-   
+
 };
 
 int32_t gpio_irq_set_lock(int32_t pad, uint32_t irq/*GPIO_IRQ(irq,type)*/,int32_t filter,bool lock)
 {
-    if(pad>=PAD_TEST_N)
+    if(pad>=PAD_MAX_PADS)
         return -1;
     gpio_irqs[(irq>>2)].irq=irq&3;
     gpio_irqs[(irq>>2)].pad=pad;
@@ -492,15 +532,15 @@ void gpio_irq_enable(uint32_t irq)
 {
     int idx=(irq>>2)&7;
     unsigned reg,start_bit;
-    unsigned type[]={0x0, ///high
-                    0x1,  ///rising
-                    0x10000, ///low
-                    0x10001 ///faling
+    unsigned type[]={0x0, ///GPIO_IRQ_HIGH
+                    0x10000, ///GPIO_IRQ_LOW
+                    0x1,  ///GPIO_IRQ_RISING
+                    0x10001, ///GPIO_IRQ_FALLING
                     };
     debug("write reg %p clr=%x set=%x",P_GPIO_INTR_EDGE_POL,0x10001<<idx,type[gpio_irqs[idx].irq]<<idx);
     /// set trigger type
     clrsetbits_le32(P_GPIO_INTR_EDGE_POL,0x10001<<idx,type[gpio_irqs[idx].irq]<<idx);
-    
+
     ///select pad
     reg=idx<4?P_GPIO_INTR_GPIO_SEL0:P_GPIO_INTR_GPIO_SEL1;
     start_bit=(idx&3)*8;
@@ -510,8 +550,207 @@ void gpio_irq_enable(uint32_t irq)
     start_bit=(idx)*4;
     clrsetbits_le32(P_GPIO_INTR_FILTER_SEL0,0x7<<start_bit,gpio_irqs[idx].filter<<start_bit);
     debug("write reg %p clr=%x set=%x",P_GPIO_INTR_FILTER_SEL0,0x7<<start_bit,gpio_irqs[idx].filter<<start_bit);
-    
+
 }
 EXPORT_SYMBOL(gpio_irq_enable);
 
 
+
+//#if defined(CONFIG_CARDREADER)
+struct gpio_addr {
+    unsigned long mode_addr;
+    unsigned long out_addr;
+    unsigned long in_addr;
+};
+static struct gpio_addr gpio_addrs[] = {
+    [PREG_PAD_GPIO0] = {P_PREG_PAD_GPIO0_EN_N, P_PREG_PAD_GPIO0_O, P_PREG_PAD_GPIO0_I},
+    [PREG_PAD_GPIO1] = {P_PREG_PAD_GPIO1_EN_N, P_PREG_PAD_GPIO1_O, P_PREG_PAD_GPIO1_I},
+    [PREG_PAD_GPIO2] = {P_PREG_PAD_GPIO2_EN_N, P_PREG_PAD_GPIO2_O, P_PREG_PAD_GPIO2_I},
+    [PREG_PAD_GPIO3] = {P_PREG_PAD_GPIO3_EN_N, P_PREG_PAD_GPIO3_O, P_PREG_PAD_GPIO3_I},
+    [PREG_PAD_GPIO4] = {P_PREG_PAD_GPIO4_EN_N, P_PREG_PAD_GPIO4_O, P_PREG_PAD_GPIO4_I},
+    [PREG_PAD_GPIO5] = {P_PREG_PAD_GPIO5_EN_N, P_PREG_PAD_GPIO5_O, P_PREG_PAD_GPIO5_I},
+    [PREG_PAD_GPIOAO] = {P_AO_GPIO_O_EN_N,     P_AO_GPIO_O_EN_N,   P_AO_GPIO_I},
+};
+
+int gpio_direction_input(unsigned gpio)
+{
+    gpio_bank_t bank = (gpio_bank_t)(gpio >> 16);
+    int bit = gpio & 0xFFFF;
+    set_gpio_mode(bank, bit, GPIO_INPUT_MODE);
+    //printk("set gpio%d.%d input\n", bank, bit);
+    return (get_gpio_val(bank, bit));
+}
+
+int gpio_direction_output(unsigned gpio, int value)
+{
+    gpio_bank_t bank = (gpio_bank_t)(gpio >> 16);
+    int bit = gpio & 0xFFFF;
+    set_gpio_val(bank, bit, value ? 1 : 0);
+    set_gpio_mode(bank, bit, GPIO_OUTPUT_MODE);
+    return 0;
+}
+
+void gpio_enable_level_int(int pin , int flag, int group)
+{
+    group &= 7;
+
+	aml_set_reg32_bits(P_GPIO_INTR_GPIO_SEL0+(group>>2), pin, (group&3)*8, 8);
+    aml_set_reg32_bits(P_GPIO_INTR_EDGE_POL, 0, group, 1);
+    aml_set_reg32_bits(P_GPIO_INTR_EDGE_POL, flag, group+16, 1);
+}
+int gpio_to_idx(unsigned gpio)
+{
+    gpio_bank_t bank = (gpio_bank_t)(gpio >> 16);
+    int bit = gpio & 0xFFFF;
+    int idx = -1;
+
+    switch(bank) {
+    case PREG_PAD_GPIO0:
+        idx = GPIOA_IDX + bit;
+                break;
+    case PREG_PAD_GPIO1:
+        idx = GPIOB_IDX + bit;
+                break;
+    case PREG_PAD_GPIO2:
+        idx = GPIOC_IDX + bit;
+                break;
+    case PREG_PAD_GPIO3:
+                if( bit < 20 ) {
+            idx = GPIO_BOOT_IDX + bit;
+                } else {
+            idx = GPIOX_IDX + (bit + 12);
+                }
+                break;
+    case PREG_PAD_GPIO4:
+        idx = GPIOX_IDX + bit;
+                break;
+    case PREG_PAD_GPIO5:
+                if( bit < 23 ) {
+            idx = GPIOY_IDX + bit;
+                } else {
+                idx = GPIO_CARD_IDX + (bit - 23) ;
+                }
+                break;
+    case PREG_PAD_GPIOAO:
+        idx = GPIOAO_IDX + bit;
+                break;
+        }
+
+    return idx;
+}
+
+void gpio_enable_edge_int(int pin , int flag, int group)
+{
+        group &= 7;
+
+        aml_set_reg32_bits(P_GPIO_INTR_GPIO_SEL0+(group>>2), pin, (group&3)*8, 8);
+        aml_set_reg32_bits(P_GPIO_INTR_EDGE_POL, 1, group, 1);
+        aml_set_reg32_bits(P_GPIO_INTR_EDGE_POL, flag, group+16, 1);
+}
+
+gpio_mode_t get_gpio_mode(gpio_bank_t bank, int bit)
+{
+    unsigned long addr = gpio_addrs[bank].mode_addr;
+#ifdef CONFIG_EXGPIO
+    if (bank >= EXGPIO_BANK0) {
+        return get_exgpio_mode(bank - EXGPIO_BANK0, bit);
+    }
+#endif
+    if (bank==PREG_PAD_GPIOAO)
+        return (aml_get_reg32_bits(addr, bit, 1) > 0) ? (GPIO_INPUT_MODE) : (GPIO_OUTPUT_MODE);
+    return (aml_get_reg32_bits(addr, bit, 1) > 0) ? (GPIO_INPUT_MODE) : (GPIO_OUTPUT_MODE);
+}
+
+int set_gpio_mode(gpio_bank_t bank, int bit, gpio_mode_t mode)
+{
+    unsigned long addr = gpio_addrs[bank].mode_addr;
+#ifdef CONFIG_EXGPIO
+    if (bank >= EXGPIO_BANK0) {
+        set_exgpio_mode(bank - EXGPIO_BANK0, bit, mode);
+        return 0;
+    }
+#endif
+		aml_set_reg32_bits(addr, mode, bit, 1);
+    return 0;
+}
+
+unsigned long  get_gpio_val(gpio_bank_t bank, int bit)
+{
+    unsigned long addr = gpio_addrs[bank].in_addr;
+#ifdef CONFIG_EXGPIO
+    if (bank >= EXGPIO_BANK0) {
+        return get_exgpio_val(bank - EXGPIO_BANK0, bit);
+    }
+#endif
+    return aml_get_reg32_bits(addr,bit,1);
+}
+
+int set_gpio_val(gpio_bank_t bank, int bit, unsigned long val)
+{
+    unsigned long addr = gpio_addrs[bank].out_addr;
+#ifdef CONFIG_EXGPIO
+    if (bank >= EXGPIO_BANK0) {
+        set_exgpio_val(bank - EXGPIO_BANK0, bit, val);
+        return 0;
+    }
+#endif
+    /* AO output: Because GPIO enable and output use the same register, we need shift 16 bit*/
+    if(bank == PREG_PAD_GPIOAO) { /* AO output need shift 16 bit*/
+		aml_set_reg32_bits(addr, val ? 1 : 0, bit+16, 1);
+    } else {
+		aml_set_reg32_bits(addr, val ? 1 : 0, bit, 1);
+    }
+    return 0;
+}
+
+void gpio_free(unsigned gpio)
+{
+	return;
+}
+
+int gpio_request(unsigned gpio, const char *label)
+{
+	return 0;
+}
+
+int gpio_cansleep(unsigned gpio)
+{
+    /* Always return 0. We don't have I2C/SPI GPIOs. */
+    return 0;
+}
+
+void gpio_set_value_cansleep(unsigned gpio, int value)
+{
+    might_sleep();
+    gpio_set_value(gpio, value);
+}
+
+int gpio_get_value_cansleep(unsigned gpio)
+{
+    might_sleep();
+    return gpio_get_value(gpio);
+}
+
+void gpio_set_value(unsigned gpio, int value)
+{
+    gpio_bank_t bank = (gpio_bank_t)(gpio >> 16);
+    int bit = gpio & 0xFFFF;
+    set_gpio_val(bank, bit, value ? 1 : 0);
+}
+
+int gpio_get_value(unsigned gpio)
+{
+    gpio_bank_t bank = (gpio_bank_t)(gpio >> 16);
+    int bit = gpio & 0xFFFF;
+    return (get_gpio_val(bank, bit));
+}
+
+int gpio_is_valid(int number)
+{
+    /* only non-negative numbers are valid */
+    return number >= 0;
+}
+EXPORT_SYMBOL(gpio_is_valid);
+
+
+//#endif

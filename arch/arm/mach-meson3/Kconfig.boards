@@ -20,4 +20,16 @@ config MACH_M3_REF
 	help
 	  Support for Amlogic Meson3 reference development platform.
 
+	  
+config MACH_MESON3_8726M_SKT
+	depends on ARCH_MESON3=y
+	bool "MyGica A11"
+	default y
+	select GENERIC_GPIO
+	select LEDS_GPIO
+	select LEDS_GPIO_PLATFORM
+	select LEDS_TRIGGER_DEFAULT_ON
+	help
+	  Support for Amlogic Meson3 reference development platform
+	  
 endif # ARCH_MESON3

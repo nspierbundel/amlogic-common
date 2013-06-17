@@ -34,6 +34,11 @@
 #include <linux/wakelock.h>
 #endif
 
+#ifdef CONFIG_SUSPEND_WATCHDOG
+extern void enable_watchdog(void);
+extern void reset_watchdog(void);
+#endif
+
 #ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
 static struct early_suspend early_suspend;
@@ -51,6 +56,7 @@ static void (*meson_sram_suspend)(struct meson_pm_config *);
 static struct meson_pm_config *pdata;
 static int mask_save[4];
 
+#ifndef CONFIG_MESON_SUSPEND
 static void meson_sram_push(void *dest, void *src, unsigned int size)
 {
     int res = 0;
@@ -59,6 +65,7 @@ static void meson_sram_push(void *dest, void *src, unsigned int size)
     res = memcmp(dest, src, size);
     printk("compare code in sram addr = 0x%x, size = 0x%x, result = %d", (unsigned)dest, size, res);
 }
+#endif
 
 #define GATE_OFF(_MOD) do {power_gate_flag[GCLK_IDX_##_MOD] = IS_CLK_GATE_ON(_MOD);CLK_GATE_OFF(_MOD);} while(0)
 #define GATE_ON(_MOD) do {if (power_gate_flag[GCLK_IDX_##_MOD]) CLK_GATE_ON(_MOD);} while(0)
@@ -716,9 +723,8 @@ static void meson_system_late_resume(struct early_suspend *h)
         printk(KERN_INFO "sys_resume\n");
     }
 #ifdef CONFIG_SUSPEND_WATCHDOG
-		extern void reset_watchdog(void);
-		reset_watchdog();
-#endif    
+    reset_watchdog();
+#endif
 }
 #endif
 
@@ -726,11 +732,13 @@ static void meson_system_late_resume(struct early_suspend *h)
 #define         MODE_IRQ_DELAYED_WAKE   1
 #define         MODE_IRQ_ONLY_WAKE      2
 
+#ifndef CONFIG_MESON_SUSPEND
 static void auto_clk_gating_setup(
     unsigned long sleep_dly_tb, unsigned long mode, unsigned long clear_fiq, unsigned long clear_irq,
     unsigned long   start_delay, unsigned long   clock_gate_dly, unsigned long   sleep_time, unsigned long   enable_delay)
 {
 }
+#endif
 
 static void meson_pm_suspend(void)
 {
@@ -742,8 +750,7 @@ static void meson_pm_suspend(void)
 
     printk(KERN_INFO "enter meson_pm_suspend!\n");
 #ifdef CONFIG_SUSPEND_WATCHDOG
-		extern void enable_watchdog(void);
-		enable_watchdog();
+    enable_watchdog();
 #endif
 
     pdata->ddr_clk = aml_read_reg32(P_HHI_DDR_PLL_CNTL);

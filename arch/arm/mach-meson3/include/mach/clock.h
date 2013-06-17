@@ -142,4 +142,8 @@ unsigned int get_system_clk(void );
 unsigned int get_misc_pll_clk(void );
 unsigned int get_ddr_pll_clk(void );
 int    clk_measure(char  index );
+
+extern unsigned long mali_clock_gating_lock(void);
+extern void mali_clock_gating_unlock(unsigned long flags);
+
 #endif //__ARCH_ARM_MESON3_CLOCK_H
