@@ -334,7 +334,7 @@ static struct platform_device aml_i2c_device = {
 
 static struct i2c_board_info __initdata aml_i2c_bus_info[] = {
 	{
-		I2C_BOARD_INFO("at88scxx", (0xB6>>1)),
+		I2C_BOARD_INFO("at88scxx", 0xB6),
 	},
 };
 
@@ -433,6 +433,21 @@ static void disable_unused_model(void)
     CLK_GATE_OFF(BT656_IN);
 #endif    
 }
+static void __init meson_cache_init(void)
+{
+#ifdef CONFIG_CACHE_L2X0
+    /*
+     * Early BRESP, I/D prefetch enabled
+     * Non-secure enabled
+     * 128kb (16KB/way),
+     * 8-way associativity,
+     * evmon/parity/share disabled
+     * Full Line of Zero enabled
+         * Bits:  .111 .... .100 0010 0000 .... .... ...1
+     */
+    l2x0_init((void __iomem *)IO_PL310_BASE, 0x7c420001, 0xff800fff);
+#endif
+}
 
 static void  __init backup_board_pinmux(void)
 {//devices_pins in __initdata section ,it will be released .
@@ -484,75 +499,48 @@ static struct platform_device aml_uart_device = {
 };
 
 #ifdef CONFIG_AM_ETHERNET
+//#define ETH_MODE_RGMII
+//#define ETH_MODE_RMII_INTERNAL
+#define ETH_MODE_RMII_EXTERNAL
 static void aml_eth_reset(void)
 {
+    unsigned int val = 0;
+
     printk(KERN_INFO "****** aml_eth_reset() ******\n");
-	
-	aml_clr_reg32_mask(P_PREG_ETHERNET_ADDR0, 1);           // Disable the Ethernet clocks
-	// ---------------------------------------------
-	// Test 50Mhz Input Divide by 2
-	// ---------------------------------------------
-	// Select divide by 2
-    aml_clr_reg32_mask(P_PREG_ETHERNET_ADDR0, (1<<3));     // desc endianess "same order" 
-	aml_clr_reg32_mask(P_PREG_ETHERNET_ADDR0, (1<<2));     // ata endianess "little"
-	aml_set_reg32_mask(P_PREG_ETHERNET_ADDR0, (1<<1));     // divide by 2 for 100M
-	aml_set_reg32_mask(P_PREG_ETHERNET_ADDR0, 1);          // enable Ethernet clocks
-	
+#ifdef ETH_MODE_RGMII
+    val = 0x211;
+#else
+    val = 0x241;
+#endif
+
+    /* setup ethernet mode */
+    aml_set_reg32_mask(P_PREG_ETHERNET_ADDR0, val);
+
     /* setup ethernet interrupt */
     aml_set_reg32_mask(P_A9_0_IRQ_IN0_INTR_MASK, 1 << 8);
     aml_set_reg32_mask(P_A9_0_IRQ_IN1_INTR_STAT, 1 << 8);
 
-	udelay(100);
-	
     /* hardware reset ethernet phy */
     gpio_direction_output(GPIO_ETH_RESET, 0);
     msleep(20);
     gpio_set_value(GPIO_ETH_RESET, 1);
+
 }
 
 static void aml_eth_clock_enable(void)
 {
-	unsigned int n = 0;
-	unsigned int clk_invert = 0;
-/*
-	old 2.6 code -> eth_clk_set(ETH_CLKSRC_EXT_XTAL_CLK, (50 * CLK_1M), (50 * CLK_1M), 1);
-	
-	#define ETH_BANK0_GPIOY1_Y9     	0
-	#define ETH_CLK_IN_GPIOY0_REG6_18	0
-	#define ETH_BANK0_REG1          	6
-	#define PERIPHS_PIN_MUX_6  			0x 
-		
-	eth_clk_set(ETH_CLKSRC_EXT_XTAL_CLK, (50 * CLK_1M), (50 * CLK_1M), 1);
-	
-	N = (50 * CLK_1M) / (50 * CLK_1M) = 1
-	
-	               (n - 1) << 0 |
-                   selectclk << 9 |
-                   ((clk_invert == 1) ? 1 : 0) << 14 | //PAD signal invert
-                   1 << 8 //enable clk
-                  );
-	
-    bit
-    7..0: Clock Divider
-    8   : Clock Enable
-    13.9: Clock Source
-    14  : Clock Inverted
-		results as code below.
-	*/
-	
-    printk(KERN_INFO "****** aml_eth_clock_enable() ******\n");
+    unsigned int val = 0;
 
-	/* A11: External Clock */
-	n = 1;
-	clk_invert = 1;
-	aml_write_reg32(P_HHI_ETH_CLK_CNTL, (
-		(n - 1) << 0 |  					// Clock Divider
-        7 << 9 | 		  					// Clock Source 7 = ETH_CLKSRC_EXT_XTAL_CLK
-        ((clk_invert == 1) ? 1 : 0) << 14 | // PAD signal invert
-        1 << 8 								// enable clk
-		)
-	);
-	printk("P_HHI_ETH_CLK_CNTL = 0x%x\n", aml_read_reg32(P_HHI_ETH_CLK_CNTL));
+    printk(KERN_INFO "****** aml_eth_clock_enable() ******\n");
+#ifdef ETH_MODE_RGMII
+    val = 0x309;
+#elif defined(ETH_MODE_RMII_EXTERNAL)
+    val = 0x130;
+#else
+    val = 0x702;
+#endif
+    /* setup ethernet clk */
+    aml_set_reg32_mask(P_HHI_ETH_CLK_CNTL, val);
 }
 
 static void aml_eth_clock_disable(void)
@@ -565,9 +553,13 @@ static void aml_eth_clock_disable(void)
 static pinmux_item_t aml_eth_pins[] = {
     /* RMII pin-mux */
     {
-		.reg = PINMUX_REG(6),
-		.clrmask = (3<<17),
-		.setmask = (1<<18), //(3<<17), // bit 18 = ETH_CLK_IN_GPIOY0_REG6_18, // BIT 17 = Ethernet in???
+	.reg = PINMUX_REG(6),
+	.clrmask = 0,
+#ifdef ETH_MODE_RMII_EXTERNAL
+	.setmask = 0x8007ffe0,
+#else
+	.setmask = 0x4007ffe0,
+#endif
     },
     PINMUX_END_ITEM
 };
@@ -580,15 +572,7 @@ static pinmux_set_t aml_eth_pinmux = {
 static void aml_eth_pinmux_setup(void)
 {
     printk(KERN_INFO "****** aml_eth_pinmux_setup() ******\n");
-	/* Old 2.6 old 
-		CLEAR_CBUS_REG_MASK(PERIPHS_PIN_MUX_6,(3<<17));//reg6[17/18]=0
-		eth_set_pinmux(ETH_BANK0_GPIOY1_Y9, ETH_CLK_IN_GPIOY0_REG6_18, 0);
-	
-		results in:
-	*/
-	pinmux_clr(&aml_eth_pinmux);
     pinmux_set(&aml_eth_pinmux);
-	aml_set_reg32_mask(P_PERIPHS_PIN_MUX_0, 0);
 }
 
 static void aml_eth_pinmux_cleanup(void)
@@ -602,11 +586,6 @@ static void aml_eth_init(void)
     aml_eth_pinmux_setup();
     aml_eth_clock_enable();
     aml_eth_reset();
-	
-	/* debug code */
-	printk("P_PERIPHS_PIN_MUX_0 = 0x%8x\n", aml_read_reg32(P_PERIPHS_PIN_MUX_0));
-	printk("P_PERIPHS_PIN_MUX_6 = 0x%8x\n", aml_read_reg32(P_PERIPHS_PIN_MUX_6));	
-	printk("P_PREG_ETHERNET_ADDR0 = 0x%8x\n", aml_read_reg32(P_PREG_ETHERNET_ADDR0));
 }
 
 static struct aml_eth_platdata aml_eth_pdata __initdata = {
@@ -1176,12 +1155,15 @@ static struct platform_device aml_hdmi_device = {
 
 static struct platform_device  *platform_devs[] = {
     &aml_uart_device,
+#if defined(CONFIG_AML_HDMI_TX)
+    &aml_hdmi_device,
+#endif
     &meson_device_fb,
-    &meson_device_codec,
+    //&meson_device_codec,
 #if defined(CONFIG_SND_AML_M3)
-    &aml_audio,
-    &aml_dai,
-    &aml_m3_audio,
+    //&aml_audio,
+    //&aml_dai,
+    //&aml_m3_audio,
 #endif
 #if defined(CONFIG_KEYPADS_AM)||defined(CONFIG_VIRTUAL_REMOTE)||defined(CONFIG_KEYPADS_AM_MODULE)
     &input_device,
@@ -1213,9 +1195,6 @@ static struct platform_device  *platform_devs[] = {
 #if defined(CONFIG_AML_AUDIO_DSP)
     &audiodsp_device,
 #endif //CONFIG_AML_AUDIO_DSP
-#if defined(CONFIG_AML_HDMI_TX)
-    &aml_hdmi_device,
-#endif
 #ifdef CONFIG_POST_PROCESS_MANAGER
     &ppmgr_device,
 #endif
@@ -1249,8 +1228,10 @@ static void __init power_hold(void)
 	// extern_usb_wifi_power(1);
 }
 
-static __init void meson_machine_init(void)
+static __init void meson_m3ref_init(void)
 {
+	// backup_board_pinmux();
+	meson_cache_init();
 	setup_devices_resource();
 	power_hold();
 	platform_add_devices(platform_devs, ARRAY_SIZE(platform_devs));
@@ -1330,12 +1311,12 @@ static  void __init meson_map_io(void)
     iotable_init(meson_io_desc, ARRAY_SIZE(meson_io_desc));
 }
 
-static __init void meson_irq_init(void)
+static __init void m3_irq_init(void)
 {
     meson_init_irq();
 }
 
-static __init void meson_fixup(struct machine_desc *mach, struct tag *tag, char **cmdline, struct meminfo *m)
+static __init void m3_fixup(struct machine_desc *mach, struct tag *tag, char **cmdline, struct meminfo *m)
 {
     struct membank *pbank;
     m->nr_banks = 0;
@@ -1356,23 +1337,13 @@ static __init void meson_fixup(struct machine_desc *mach, struct tag *tag, char 
 
 }
 
-static __init void meson_init_early(void)
-{
-    //mesonplat_register_device_early("meson_uart","AO",NULL);
-    parse_early_param();
-    /* Let earlyprintk output early console messages */
-    // early_platform_driver_probe("earlyprintk", 4, 0);
-}
-
-
 MACHINE_START(M3_REF, "Amlogic Meson3 reference development platform")
     .boot_params    = BOOT_PARAMS_OFFSET,
     .map_io         = meson_map_io,
-    .init_early     = meson_init_early,
-    .init_irq       = meson_irq_init,
+    .init_irq       = m3_irq_init,
     .timer          = &meson_sys_timer,
-    .init_machine   = meson_machine_init,
-    .fixup          = meson_fixup,
+    .init_machine   = meson_m3ref_init,
+    .fixup          = m3_fixup,
     .video_start    = RESERVED_MEM_START,
     .video_end      = RESERVED_MEM_END,
 MACHINE_END
@@ -1380,11 +1351,10 @@ MACHINE_END
 MACHINE_START(VMX25, "Amlogic Meson3 reference development platform (legacy)")
     .boot_params    = BOOT_PARAMS_OFFSET,
     .map_io         = meson_map_io,
-    .init_early     = meson_init_early,
-    .init_irq       = meson_irq_init,
+    .init_irq       = m3_irq_init,
     .timer          = &meson_sys_timer,
-    .init_machine   = meson_machine_init,
-    .fixup          = meson_fixup,
+    .init_machine   = meson_m3ref_init,
+    .fixup          = m3_fixup,
     .video_start    = RESERVED_MEM_START,
     .video_end      = RESERVED_MEM_END,
 MACHINE_END

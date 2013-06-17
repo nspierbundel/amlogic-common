@@ -25,7 +25,6 @@
 #include <mach/power_gate.h>
 
 static DEFINE_SPINLOCK(clockfw_lock);
-static DEFINE_SPINLOCK(mali_clk_lock);
 
 #ifdef CONFIG_INIT_A9_CLOCK_FREQ
 static unsigned long __initdata init_clock = CONFIG_INIT_A9_CLOCK;
@@ -1118,24 +1117,4 @@ void clk_disable(struct clk *clk)
     spin_unlock_irqrestore(&clockfw_lock, flags);
 }
 EXPORT_SYMBOL(clk_disable);
-
-
-
-/* Missing code for MALI */
-
-unsigned long mali_clock_gating_lock(void)
-{
-    unsigned long flags;
-
-    spin_lock_irqsave(&mali_clk_lock, flags);
-
-    return flags;
-}
-EXPORT_SYMBOL(mali_clock_gating_lock);
-
-void mali_clock_gating_unlock(unsigned long flags)
-{
-    spin_unlock_irqrestore(&mali_clk_lock, flags);
-}
-EXPORT_SYMBOL(mali_clock_gating_unlock);
 

@@ -3,7 +3,7 @@
 #
 
 # Common support
-obj-y := cpu.o clock.o clk_set.o gpio.o time.o usbclock.o usbsetting.o
+obj-y := clock.o clk_set.o gpio.o time.o usbclock.o usbsetting.o
 obj-m :=
 obj-n :=
 obj-  :=
