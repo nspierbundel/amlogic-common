@@ -12,10 +12,9 @@
 #ifndef __MACH_MESSON3_REGS_H
 #define __MACH_MESSON3_REGS_H
 
-#ifndef __ASSEMBLY__
+#ifdef __ASSEMBLY__
 
-#include <asm/io.h>
-#include "reg_addr.h"
+#else
 
 #if CONFIG_MESON_LEGACY_REGISTER_API
 #define WRITE_CBUS_REG(reg, val) __raw_writel(val, CBUS_REG_ADDR(reg))
@@ -163,5 +162,9 @@
 #include "pctl.h"
 #include "dmc.h"
 #include "am_eth_reg.h"
+
+#include <linux/io.h>
+#include "register.h"
+#include "reg_addr.h"
 
 #endif //__MACH_MESSON3_REGS_H
